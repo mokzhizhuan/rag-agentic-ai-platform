@@ -126,3 +126,22 @@ def plan_tool(question, provider_override=None):
                                       'You are a tool router. Output only knowledge_search or calculator.')).strip().lower()
     match = re.search(r'\b(calculator|knowledge_search)\b', decision)
     return match.group(1) if match else 'knowledge_search'
+
+
+GENERAL_PROMPT = """You are a helpful AI assistant. Answer general questions using your model knowledge. Do not pretend to have browsed the internet or read user files. Do not invent document citations. If the user asks for a spreadsheet or other downloadable file, explain you can draft structured spreadsheet-ready content, but this chat has no file creation tool. For time-sensitive facts disclose that you have not checked live sources. Be clear, accurate, and useful."""
+
+
+def plan_auto(question, provider_override=None):
+    """One lightweight semantic routing decision; never treats a document as tool instructions."""
+    import re
+    prompt = ("Classify the user's latest request. Answer exactly ONE label: "
+              "knowledge_search if user asks about their uploaded files, documentation, "
+              "specific application facts grounded in their private documents; "
+              "general if user asks for general explanations, advice, tutorials, "
+              "plans, draft tables or spreadsheet outlines from general knowledge. "
+              "Do NOT choose knowledge_search just because the topic mentions RAG, AI, "
+              "authentication, or software. Do not search the web. Request: " + question[:1500])
+    decision = ''.join(stream_generate(prompt, [], [], provider_override,
+                                     'You are a routing classifier. Output only general or knowledge_search.')).strip().lower()
+    match = re.search(r'\b(general|knowledge_search)\b', decision)
+    return match.group(1) if match else 'general'

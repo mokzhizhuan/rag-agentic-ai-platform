@@ -125,7 +125,7 @@ import json
 import logging
 import os
 from django.http import StreamingHttpResponse
-from .providers import stream_generate, plan_tool
+from .providers import stream_generate, plan_tool, plan_auto, GENERAL_PROMPT
 
 stream_log = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ def ask_stream(request):
         return Response({'detail': 'Question must contain 2–1500 characters'}, status=400)
     question = question.strip()
     mode = request.data.get('mode', 'rag')
-    if mode not in ('rag', 'agent'):
+    if mode not in ('rag', 'agent', 'auto'):
         return Response({'detail': 'Unsupported chat mode'}, status=400)
     selected_provider = request.data.get('provider', 'ollama')
     if selected_provider not in ('ollama', 'openai'):
@@ -160,8 +160,13 @@ def ask_stream(request):
     # Do not use request inside the lazy generator; it runs after the view returns.
     def events():
         try:
-            yield _sse('status', {'stage': 'searching', 'message': 'Searching knowledge base...'})
             chosen_tool = 'knowledge_search'
+            if mode == 'auto':
+                yield _sse('status', {'stage': 'routing', 'message': 'Choosing the best answer source...'})
+                chosen_tool = plan_auto(question, selected_provider)
+                yield _sse('tool', {'name':chosen_tool, 'status':'selected'})
+            elif mode == 'rag':
+                yield _sse('status', {'stage': 'searching', 'message': 'Searching knowledge base...'})
             if mode == 'agent':
                 yield _sse('status', {'stage':'planning','message':'Selecting an agent tool...'})
                 chosen_tool = plan_tool(question, selected_provider)
@@ -177,7 +182,8 @@ def ask_stream(request):
                 except (ValueError, SyntaxError, ZeroDivisionError, OverflowError) as exc:
                     yield _sse('error', {'detail':'Calculator accepts arithmetic expressions only (example: Calculate 12 * 7).'})
                     return
-            else:
+            elif chosen_tool == 'knowledge_search':
+                yield _sse('status', {'stage': 'searching', 'message': 'Searching knowledge base...'})
                 ep, em = config()
                 provider, model = chat_settings(selected_provider)
                 base = KnowledgeChunk.objects.filter(
@@ -185,22 +191,30 @@ def ask_stream(request):
                     document__embedding_provider=ep, document__embedding_model=em,
                 )
                 if not base.exists():
-                    yield _sse('error', {'detail': 'No indexed documents for the configured embedding model. Upload a document first.'})
-                    return
-                vector = embed([question])[0]
-                chunks = list(base.select_related('document').annotate(
-                    distance=CosineDistance('embedding', vector)
-                ).order_by('distance', 'pk')[:int(os.getenv('RAG_TOP_K', '2'))])
-                threshold = float(os.getenv('RAG_MIN_SIMILARITY', '0.15'))
-                passages = []
-                for ch in chunks:
-                    similarity = 1 - float(ch.distance)
-                    if similarity >= threshold:
-                        passages.append({
-                            'document_id': ch.document_id, 'filename': ch.document.filename,
-                            'page': ch.page, 'chunk_index': ch.index, 'text': ch.text,
-                            'similarity': round(similarity, 4),
-                        })
+                    if mode == 'auto':
+                        chosen_tool = 'general'
+                        yield _sse('status', {'stage': 'routing', 'message': 'No indexed documents; using general AI knowledge.'})
+                    else:
+                        yield _sse('error', {'detail': 'No indexed documents for the configured embedding model. Upload a document first.'})
+                        return
+                if chosen_tool == 'knowledge_search':
+                    vector = embed([question])[0]
+                    chunks = list(base.select_related('document').annotate(
+                        distance=CosineDistance('embedding', vector)
+                    ).order_by('distance', 'pk')[:int(os.getenv('RAG_TOP_K', '2'))])
+                    threshold = float(os.getenv('RAG_MIN_SIMILARITY', '0.15'))
+                    passages = []
+                    for ch in chunks:
+                        similarity = 1 - float(ch.distance)
+                        if similarity >= threshold:
+                            passages.append({
+                                'document_id': ch.document_id, 'filename': ch.document.filename,
+                                'page': ch.page, 'chunk_index': ch.index, 'text': ch.text,
+                                'similarity': round(similarity, 4),
+                            })
+            if mode == 'auto' and chosen_tool == 'knowledge_search' and not passages:
+                chosen_tool = 'general'
+                yield _sse('status', {'stage':'routing','message':'No relevant passages; answering from general AI knowledge.'})
             if mode == 'agent':
                 yield _sse('tool', {'name':chosen_tool,'status':'completed'})
             sources = [{**{k: p[k] for k in ('document_id', 'filename', 'page', 'chunk_index', 'similarity')},
@@ -216,6 +230,15 @@ def ask_stream(request):
             elif passages:
                 yield _sse('status', {'stage': 'generating', 'message': 'Generating answer...'})
                 for token in stream_generate(question, passages, history, selected_provider):
+                    answer += token
+                    yield _sse('token', {'text': token})
+                answer = answer.strip()
+                if not answer:
+                    yield _sse('error', {'detail': 'AI provider returned an empty answer'})
+                    return
+            elif mode == 'auto' and chosen_tool == 'general':
+                yield _sse('status', {'stage':'generating','message':'Answering from model general knowledge (no web search)...'})
+                for token in stream_generate(question, [], history, selected_provider, system_override=GENERAL_PROMPT):
                     answer += token
                     yield _sse('token', {'text': token})
                 answer = answer.strip()
