@@ -1,0 +1,28 @@
+/* Phase 8.1 readability patch — keep light inline-style memory panels in dark mode. */
+/* React serializes inline color styles as rgb(...) in some browsers. Match both forms. */
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"],
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"],
+main.rag-shell .chat-panel div[style*="background: rgb(255, 255, 255)"],
+main.rag-shell .chat-panel div[style*="background: #fff"] {
+  background: #172234 !important;
+  border: 1px solid rgba(148,163,184,.20);
+  color: #edf2fa !important;
+}
+/* The AI memory area is the panel immediately above the chat composer. */
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] *,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] * {
+  color: #e2e8f0;
+}
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] small,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] small,
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] .muted,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] .muted {
+  color: #aebbd0 !important;
+}
+main.rag-shell input::placeholder,
+main.rag-shell textarea::placeholder { color: #a9b8d0; opacity: 1; }
+main.rag-shell input[type="file"] { color: #e2e8f0; }
+main.rag-shell input[type="file"]::file-selector-button { background: #293957; color: #f8fafc; border: 1px solid #52627d; border-radius: 5px; padding: 5px 9px; margin-right: 9px; }
+main.rag-shell .chat-panel summary { color: #e2e8f0; cursor: pointer; }
+main.rag-shell .chat-panel .chat-empty { color: #b4c3d8; }
+main.rag-shell .chat-panel select, main.rag-shell .chat-panel input, main.rag-shell .chat-panel textarea { color: #f8fafc; }

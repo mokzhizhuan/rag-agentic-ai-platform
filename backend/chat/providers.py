@@ -29,12 +29,16 @@ def build_messages(question, passages, history):
     messages.append({'role': 'user', 'content': question})
     return messages
 
-def stream_generate(question, passages, history, provider_override=None, system_override=None):
+def stream_generate(question, passages, history, provider_override=None, system_override=None, memory_context=""):
     """Yield text fragments from Ollama or OpenAI. No tokens/keys in logs."""
     provider, model = chat_settings(provider_override)
     messages = build_messages(question, passages, history)
     if system_override is not None:
         messages = [{"role": "system", "content": system_override}, {"role": "user", "content": question}]
+    if memory_context:
+        # Append to the system prompt, not to the user's question or document citations.
+        if messages and messages[0].get('role') == 'system':
+            messages[0]['content'] += memory_context
     try:
         if provider == 'ollama':
             base = os.getenv('OLLAMA_BASE_URL', 'http://host.docker.internal:11434').rstrip('/')

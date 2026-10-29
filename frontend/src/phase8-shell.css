@@ -1,0 +1,130 @@
+/* Phase 8.1 — Agentic Vector Dark. Scoped shell, no backend or state changes. */
+:root{color-scheme:dark;--rag-bg:#0b0f19;--rag-surface:#111827;--rag-panel:#1e293b;--rag-panel-high:#263347;--rag-border:rgba(203,213,225,.13);--rag-text:#f8fafc;--rag-muted:#94a3b8;--rag-primary:#818cf8;--rag-cyan:#22d3ee;--rag-green:#34d399;--rag-radius:9px}
+html,body,#root{min-height:100%;margin:0;background:var(--rag-bg);color:var(--rag-text)}
+body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main.rag-shell{box-sizing:border-box;min-height:100vh;display:grid;grid-template-columns:minmax(220px,258px) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;background:radial-gradient(circle at 75% 0%,rgba(99,102,241,.09),transparent 38%),var(--rag-bg);gap:0;max-width:none;margin:0;padding:0;color:var(--rag-text)}
+main.rag-shell *, main.rag-shell *::before, main.rag-shell *::after{box-sizing:border-box}
+main.rag-shell>header{grid-column:1/-1;grid-row:1;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:74px;padding:16px 26px;background:rgba(17,24,39,.97);border-bottom:1px solid var(--rag-border);position:sticky;top:0;z-index:15}
+main.rag-shell>header h1{margin:0;font-size:19px;font-weight:750;letter-spacing:-.03em;color:var(--rag-text)}
+main.rag-shell>header h1::before{content:'◈';color:var(--rag-primary);margin-right:12px;font-size:23px}
+main.rag-shell>header .action{display:flex;align-items:center;gap:12px}
+main.rag-shell>nav.tabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:7px;margin:0;padding:25px 12px;background:linear-gradient(180deg,#111827,#101624);border-right:1px solid var(--rag-border);min-width:0;min-height:calc(100vh - 136px);position:sticky;top:74px;align-self:start}
+main.rag-shell>nav.tabs::before{content:'WORKSPACE';font:600 20px/1.5 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.16em;color:#64748b;padding:0 13px 18px}
+main.rag-shell>nav.tabs>button{width:100%;min-height:44px;border:1px solid transparent;border-radius:7px;text-align:left;display:block;padding:12px 15px;background:transparent;color:#9daec6;box-shadow:none;font-size:14px;font-weight:600;transition:background .15s,border-color .15s,color .15s}
+main.rag-shell>nav.tabs>button:hover{background:#1c2840;color:#fff;border-color:rgba(129,140,248,.12)}
+main.rag-shell>nav.tabs>button.selected{background:rgba(99,102,241,.14);border-color:rgba(129,140,248,.3);color:#d9ddff;box-shadow:inset 3px 0 0 #818cf8}
+main.rag-shell>.chat-layout,main.rag-shell>section{grid-column:2;grid-row:2;min-width:0;padding:26px clamp(16px,2.6vw,38px);max-width:none;overflow-wrap:anywhere}
+main.rag-shell>.chat-layout{display:grid;grid-template-columns:minmax(190px,250px) minmax(0,1fr);gap:18px;align-content:start}
+main.rag-shell .sidebar,main.rag-shell .chat-panel,main.rag-shell article,main.rag-shell .message-list,main.rag-shell .doc,main.rag-shell .source{border:1px solid var(--rag-border);border-radius:var(--rag-radius);background:var(--rag-surface);color:var(--rag-text)}
+main.rag-shell article{padding:18px;margin-bottom:16px}
+main.rag-shell .sidebar{padding:16px;min-width:0}
+main.rag-shell .chat-panel{padding:19px;min-width:0}
+main.rag-shell h2{color:var(--rag-text);font-size:21px;line-height:1.35;letter-spacing:-.025em;margin-top:0}
+main.rag-shell h3{color:#e2e8f0;font-size:15px;letter-spacing:-.01em}
+main.rag-shell p,main.rag-shell label,main.rag-shell small{color:inherit}
+main.rag-shell .muted,main.rag-shell small{color:var(--rag-muted)}
+main.rag-shell .doc{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:14px;margin:10px 0}
+main.rag-shell .doc .action{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+main.rag-shell input:not([type='range']):not([type='checkbox']):not([type='radio']),main.rag-shell select,main.rag-shell textarea{background:#0b1220;color:#e2e8f0;border:1px solid rgba(148,163,184,.24);border-radius:6px;max-width:100%;accent-color:#818cf8}
+main.rag-shell input:focus-visible,main.rag-shell textarea:focus-visible,main.rag-shell select:focus-visible,main.rag-shell button:focus-visible{outline:2px solid var(--rag-primary);outline-offset:2px}
+main.rag-shell button{cursor:pointer;border-radius:6px}
+main.rag-shell button:disabled{opacity:.5;cursor:not-allowed}
+main.rag-shell>section button:not(.selected):not(.chat-link):not(.delete-small),main.rag-shell>.chat-layout button:not(.selected):not(.chat-link):not(.delete-small){background:#343a95;color:white;border:1px solid rgba(129,140,248,.3);padding:8px 13px;font-weight:600}
+main.rag-shell>section button:not(.selected):not(.chat-link):not(.delete-small):hover:not(:disabled),main.rag-shell>.chat-layout button:not(.selected):not(.chat-link):not(.delete-small):hover:not(:disabled){background:#4f46e5}
+main.rag-shell .message-list{min-height:300px;max-height:min(57vh,720px);overflow:auto;background:#0c1220;padding:13px}
+main.rag-shell .message{padding:13px 15px;margin:10px 0;border-radius:8px;line-height:1.55;white-space:pre-wrap}
+main.rag-shell .message.user{background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.22)}
+main.rag-shell .message.assistant{background:rgba(30,41,59,.75);border:1px solid var(--rag-border)}
+main.rag-shell .message-label{font-size:11px;color:var(--rag-cyan);font-weight:700;letter-spacing:.04em}
+main.rag-shell .chat-entry{display:flex;gap:10px;align-items:flex-end}
+main.rag-shell .chat-entry textarea{flex:1;min-width:0}
+main.rag-shell .conversation-row,main.rag-shell .chat-row{border-bottom:1px solid var(--rag-border)}
+main.rag-shell .source{padding:10px;margin-top:8px}
+main.rag-shell progress{accent-color:#818cf8}
+main.rag-shell>p.muted{grid-column:1/-1;grid-row:3;padding:15px 26px;margin:0;border-top:1px solid var(--rag-border);background:#0e1420;font-size:11px;color:#7788a0}
+main.rag-shell ::selection{background:rgba(99,102,241,.42);color:white}
+@media (max-width:1050px){main.rag-shell>.chat-layout{grid-template-columns:1fr}main.rag-shell .sidebar{position:static}main.rag-shell .message-list{max-height:58vh}}
+@media (max-width:760px){main.rag-shell{grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr) auto}main.rag-shell>header{grid-column:1;grid-row:1;padding:14px 15px;min-height:64px;position:static}main.rag-shell>header h1{font-size:16px}main.rag-shell>nav.tabs{grid-column:1;grid-row:2;flex-direction:row;gap:5px;min-height:0;padding:9px;position:static;overflow-x:auto;border-right:0;border-bottom:1px solid var(--rag-border)}main.rag-shell>nav.tabs::before{display:none}main.rag-shell>nav.tabs>button{min-width:max-content;text-align:center;width:auto;padding:10px 12px;font-size:12px}main.rag-shell>nav.tabs>button.selected{box-shadow:inset 0 -3px 0 #818cf8}main.rag-shell>.chat-layout,main.rag-shell>section{grid-column:1;grid-row:3;padding:16px 12px}main.rag-shell>p.muted{grid-column:1;grid-row:4}main.rag-shell .doc{flex-wrap:wrap}main.rag-shell .chat-entry{flex-direction:column;align-items:stretch}}
+@media (prefers-reduced-motion:reduce){main.rag-shell *,main.rag-shell *::before,main.rag-shell *::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* BEGIN PHASE8_1_CONTRAST_FIX */
+/* Phase 8.1 readability patch — keep light inline-style memory panels in dark mode. */
+/* React serializes inline color styles as rgb(...) in some browsers. Match both forms. */
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"],
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"],
+main.rag-shell .chat-panel div[style*="background: rgb(255, 255, 255)"],
+main.rag-shell .chat-panel div[style*="background: #fff"] {
+  background: #172234 !important;
+  border: 1px solid rgba(148,163,184,.20);
+  color: #edf2fa !important;
+}
+/* The AI memory area is the panel immediately above the chat composer. */
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] *,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] * {
+  color: #e2e8f0;
+}
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] small,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] small,
+main.rag-shell .chat-panel div[style*="background: rgb(246, 248, 252)"] .muted,
+main.rag-shell .chat-panel div[style*="background: #f6f8fc"] .muted {
+  color: #aebbd0 !important;
+}
+main.rag-shell input::placeholder,
+main.rag-shell textarea::placeholder { color: #a9b8d0; opacity: 1; }
+main.rag-shell input[type="file"] { color: #e2e8f0; }
+main.rag-shell input[type="file"]::file-selector-button { background: #293957; color: #f8fafc; border: 1px solid #52627d; border-radius: 5px; padding: 5px 9px; margin-right: 9px; }
+main.rag-shell .chat-panel summary { color: #e2e8f0; cursor: pointer; }
+main.rag-shell .chat-panel .chat-empty { color: #b4c3d8; }
+main.rag-shell .chat-panel select, main.rag-shell .chat-panel input, main.rag-shell .chat-panel textarea { color: #f8fafc; }
+/* Phase 8.1 — Header account username */
+main.rag-shell > header .action > span.muted {
+  font-size: 16px;
+  font-weight: 700;
+  color: #cbd5e1;
+  letter-spacing: 0.01em;
+}
+/* Phase 8.1 — Match AI Chat background to Knowledge Base */
+
+/* White background around the AI Chat panels */
+main.rag-shell > .chat-layout {
+  background: #ffffff !important;
+  color: #111827;
+  border-radius: 10px;
+}
+
+/* Preserve dark navy conversation and chat panels */
+main.rag-shell .chat-layout > .sidebar,
+main.rag-shell .chat-layout > .chat-panel {
+  background: #111827 !important;
+  color: #f8fafc !important;
+}
+
+/* Keep chat panel headings readable */
+main.rag-shell .chat-layout h2,
+main.rag-shell .chat-layout h3 {
+  color: #f8fafc;
+}
+
+/* Preserve dark message area */
+main.rag-shell .chat-layout .message-list {
+  background: #0c1220;
+  color: #f8fafc;
+}
+/* Phase 8.1 — Fix titles on white page backgrounds */
+
+/* Knowledge Base and Create Files headings */
+main.rag-shell > section > h2 {
+  color: #172033 !important;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+/* Description text below the headings */
+main.rag-shell > section > p.muted {
+  color: #475569 !important;
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* END PHASE8_1_CONTRAST_FIX */

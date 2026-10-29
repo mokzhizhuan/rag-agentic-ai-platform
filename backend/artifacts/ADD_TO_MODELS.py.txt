@@ -1,0 +1,2 @@
+# Add to the BOTTOM of existing backend/artifacts/models.py (don't replace models.py):
+from .jobs import GenerationJob, GenerationJobInput

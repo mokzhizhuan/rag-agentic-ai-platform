@@ -1,0 +1,94 @@
+/* Phase 8.3 – Knowledge Base & Artifact Studio. Layout and readability only. */
+main.rag-shell > section.knowledge-studio,
+main.rag-shell > section.artifact-studio {
+  background:#fff; color:#172033; border-radius:11px 11px 0 0;
+  min-height:calc(100vh - 150px); padding:28px clamp(16px,2.2vw,34px);
+}
+main.rag-shell > section.knowledge-studio > h2,
+main.rag-shell > section.artifact-studio > h2 {
+  font-size:24px; font-weight:750; line-height:1.35;
+  color:#172033 !important; margin:0 0 14px;
+}
+main.rag-shell > section.artifact-studio > p.muted,
+main.rag-shell > section.knowledge-studio > p.muted {
+  color:#475569 !important; line-height:1.6; font-size:13px; margin:0 0 20px;
+}
+main.rag-shell > section.knowledge-studio > article,
+main.rag-shell > section.artifact-studio > article {
+  background:#111827; border:1px solid #303b4f; border-radius:9px;
+  color:#f8fafc; padding:20px; margin:0 0 16px;
+  box-shadow:0 8px 20px rgba(15,23,42,.07);
+}
+main.rag-shell > section.knowledge-studio article h3,
+main.rag-shell > section.artifact-studio article h3 {
+  color:#f8fafc; font-size:16px; font-weight:700; margin:0 0 14px;
+}
+main.rag-shell > section.knowledge-studio article .muted,
+main.rag-shell > section.artifact-studio article .muted,
+main.rag-shell > section.knowledge-studio article small,
+main.rag-shell > section.artifact-studio article small {
+  color:#afc0d9 !important; line-height:1.55;
+}
+main.rag-shell > section.knowledge-studio article label,
+main.rag-shell > section.artifact-studio article label {color:#f1f5f9;}
+main.rag-shell > section.knowledge-studio article input,
+main.rag-shell > section.artifact-studio article input,
+main.rag-shell > section.artifact-studio article select,
+main.rag-shell > section.artifact-studio article textarea {
+  background:#0b1220; color:#f8fafc; border-color:#465670;
+}
+main.rag-shell > section.knowledge-studio article input::placeholder,
+main.rag-shell > section.artifact-studio article input::placeholder,
+main.rag-shell > section.artifact-studio article textarea::placeholder {color:#b5c4d8;opacity:1;}
+main.rag-shell > section.knowledge-studio article .action,
+main.rag-shell > section.artifact-studio article .action {display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
+main.rag-shell > section.artifact-studio article textarea#artifact-prompt {min-height:240px;}
+/* Override the old light inline reference-attachment and preview cards, without affecting other pages. */
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(245, 248, 252)"],
+main.rag-shell > section.artifact-studio article div[style*="background: #f5f8fc"],
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(244, 247, 252)"],
+main.rag-shell > section.artifact-studio article div[style*="background: #f4f7fc"],
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(248, 250, 252)"],
+main.rag-shell > section.artifact-studio article div[style*="background: #f8fafc"],
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(255, 255, 255)"],
+main.rag-shell > section.artifact-studio article div[style*="background: #fff"] {
+  background:#172234 !important; color:#edf2fa !important;
+  border-color:#40516b !important;
+}
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(245, 248, 252)"] > *,
+main.rag-shell > section.artifact-studio article div[style*="background: #f5f8fc"] > *,
+main.rag-shell > section.artifact-studio article div[style*="background: rgb(244, 247, 252)"] > *,
+main.rag-shell > section.artifact-studio article div[style*="background: #f4f7fc"] > * {color:#edf2fa;}
+/* Generated file cards and inline validation results. */
+main.rag-shell > section.artifact-studio article .doc {
+  background:#141e2e; border-color:#35445a;
+  padding:15px 17px; min-height:64px; gap:12px;
+}
+main.rag-shell > section.artifact-studio article .doc > div:first-child {min-width:0;flex:1 1 240px;}
+main.rag-shell > section.artifact-studio article .doc strong {overflow-wrap:anywhere;}
+main.rag-shell > section.artifact-studio article .doc .action {flex:0 1 auto;justify-content:flex-end;}
+main.rag-shell > section.artifact-studio article .doc > div[style*="flex-basis: 100%"],
+main.rag-shell > section.artifact-studio article .doc > div[style*="flexBasis"] {
+  background:#172234 !important;color:#edf2fa !important;border-color:#40516b !important;
+}
+main.rag-shell > section.artifact-studio article .doc details {
+  border:1px solid #40516b; border-radius:8px; padding:12px; margin:10px 0;
+}
+main.rag-shell > section.artifact-studio article .doc summary {cursor:pointer;color:#e2e8f0;font-weight:650;}
+main.rag-shell > section.artifact-studio article .doc pre {background:#0b1220 !important;color:#e2e8f0;border-color:#40516b !important;}
+main.rag-shell > section.artifact-studio article progress {width:100%;accent-color:#22d3ee;}
+main.rag-shell > section.knowledge-studio article .match,
+main.rag-shell > section.knowledge-studio article .doc {padding:14px; background:#172234;border-color:#35445a;}
+main.rag-shell > section.knowledge-studio article .search {flex:1;min-width:180px;}
+main.rag-shell > section.artifact-studio input[type='file']::file-selector-button,
+main.rag-shell > section.knowledge-studio input[type='file']::file-selector-button {
+  color:#f8fafc;background:#293957;border:1px solid #52627d;
+  padding:7px 11px;border-radius:5px;margin-right:8px;cursor:pointer;
+}
+@media(max-width:760px){
+  main.rag-shell > section.knowledge-studio,
+  main.rag-shell > section.artifact-studio {padding:20px 13px;min-height:0;}
+  main.rag-shell > section.knowledge-studio > article,
+  main.rag-shell > section.artifact-studio > article {padding:15px;}
+  main.rag-shell > section.artifact-studio article .doc .action {justify-content:flex-start;}
+}

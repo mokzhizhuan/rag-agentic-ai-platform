@@ -1,0 +1,508 @@
+import './phase8-shell.css';
+import './phase8-agentic.css';
+//SECTION_PROGRESS_V1
+import { useEffect, useState } from 'react';
+import type Keycloak from 'keycloak-js';
+type Doc={id:number;filename:string;status:string;error:string;byte_size:number;chunk_count:number;embedding_model:string};
+type Source={document_id:number;filename:string;page:number|null;chunk_index:number;similarity:number;excerpt:string};
+type Msg={id:number;role:'user'|'assistant';content:string;sources:Source[];model:string};
+type Conversation={id:number;title:string;updated_at:string};
+type Memory={id:number;content:string};
+type CharacterProfile={id:number;name:string;description:string;has_image:boolean;created_at:string};
+type GenerationJob={id:number;status:string;stage:string;percent:number|null;artifact_id:number|null;error:string;created_at:string;started_at:string|null;finished_at:string|null;cancel_requested:boolean};
+type ZipValidationFinding={severity:string;rule:string;file:string;message:string};
+type ZipValidationReport={summary:{error:number;warning:number;info:number};files_analyzed:number;findings:ZipValidationFinding[];limitations:string[]};
+type Artifact={id:number;filename:string;format:string;byte_size:number;conversation_id:number|null;download_path:string;created_at:string};
+const API='http://localhost:8200';
+export default function App({keycloak}:{keycloak:Keycloak}) {
+  const [docs,setDocs]=useState<Doc[]>([]);
+  const [artifacts,setArtifacts]=useState<Artifact[]>([]);
+  const [zipReports,setZipReports]=useState<Record<number,ZipValidationReport>>({});
+  const [zipValidating,setZipValidating]=useState<number|null>(null);
+  const [zipValidationErrors,setZipValidationErrors]=useState<Record<number,string>>({});
+  const [artifactPrompt,setArtifactPrompt]=useState('');
+  const [artifactFormat,setArtifactFormat]=useState('auto');
+  const [videoDuration,setVideoDuration]=useState('8');
+  const [artifactBusy,setArtifactBusy]=useState(false);
+  const [generationJobs,setGenerationJobs]=useState<GenerationJob[]>([]);
+  const [clockNow,setClockNow]=useState(Date.now());
+  const [artifactStatus,setArtifactStatus]=useState('');
+  const [artifactFiles,setArtifactFiles]=useState<File[]>([]);
+  const [characters,setCharacters]=useState<CharacterProfile[]>([]);
+  const [referencePreset,setReferencePreset]=useState<'balanced'|'identity'|'style'|'creative'>('balanced');
+  const [referenceWeights,setReferenceWeights]=useState<Record<string,number>[]>([]);
+  const [referenceHandling,setReferenceHandling]=useState('temporary');
+  const presetWeights={balanced:{identity:80,style:75,composition:65,scene:65},identity:{identity:95,style:65,composition:50,scene:55},style:{identity:65,style:95,composition:65,scene:60},creative:{identity:50,style:65,composition:45,scene:50}};
+  const roles=['identity','style','composition','scene'] as const;
+
+  const [characterLock,setCharacterLock]=useState(false);
+  const [selectedCharacter,setSelectedCharacter]=useState('');
+  const [newCharacterName,setNewCharacterName]=useState('');
+  const [newCharacterDescription,setNewCharacterDescription]=useState('');
+  const [newCharacterImage,setNewCharacterImage]=useState<File|null>(null);
+  const [characterBusy,setCharacterBusy]=useState(false);
+  const [previewArtifactId,setPreviewArtifactId]=useState<number|null>(null);
+  const [previewType,setPreviewType]=useState<'image'|'pdf'|'text'|'video'|null>(null);
+  const [previewSrc,setPreviewSrc]=useState('');
+  const [previewText,setPreviewText]=useState('');
+  const [previewLoading,setPreviewLoading]=useState(false);
+  const [previewNote,setPreviewNote]=useState('');
+  const [file,setFile]=useState<File|null>(null);
+  const [chatFiles,setChatFiles]=useState<File[]>([]);
+  const [memories,setMemories]=useState<Memory[]>([]);
+  const [memoryMode,setMemoryMode]=useState<'manual'|'auto'>('manual');
+  const [memoryDraft,setMemoryDraft]=useState('');
+  const [memoryFeedback,setMemoryFeedback]=useState('');
+
+  const [query,setQuery]=useState('');
+  const [question,setQuestion]=useState('');
+  const [results,setResults]=useState<{filename:string;text:string;similarity:number;page:number|null}[]>([]);
+  const [conversations,setConversations]=useState<Conversation[]>([]);
+  const [activeId,setActiveId]=useState<number|null>(null);
+  const [messages,setMessages]=useState<Msg[]>([]);
+  const [busy,setBusy]=useState(false);
+  const [streamText,setStreamText]=useState('');
+  const [streamStatus,setStreamStatus]=useState('');
+  const [streamSources,setStreamSources]=useState<Source[]>([]);
+  const [pendingQuestion,setPendingQuestion]=useState('');
+  const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const [provider,setProvider]=useState<'ollama'|'openai'>('ollama');
+  const [mode,setMode]=useState<'auto'|'rag'|'agent'>('auto');
+  const [toolStatus,setToolStatus]=useState('');
+  const [tab,setTab]=useState<'chat'|'documents'|'create'>('chat');
+  async function api(path:string,options:RequestInit={}) {
+    await keycloak.updateToken(30);
+    const headers=new Headers(options.headers);
+    headers.set('Authorization',`Bearer ${keycloak.token}`);
+    const response=await fetch(API+path,{...options,headers});
+    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(`${response.status}: ${typeof body.detail==='string'?body.detail:JSON.stringify(body.detail??body)}`);}
+    return response.status===204?null:response.json();
+  }
+  async function refresh(){
+    const [list,chats,personal]=await Promise.all([api('/api/knowledge/documents/'),api('/api/chat/conversations/'),api('/api/chat/memories/')]);
+    setDocs(list.documents);setConversations(chats.conversations);setMemories(personal.memories);setMemoryMode(personal.mode === 'auto' ? 'auto' : 'manual');
+  }
+  useEffect(()=>{void refresh().catch(e=>setError(String(e)));},[]);
+  async function refreshCharacters(){
+    const response=await api('/api/artifacts/characters/');setCharacters(response.profiles||[]);
+  }
+  async function saveCharacter(){
+    if(!newCharacterImage||!newCharacterName.trim())return;
+    setCharacterBusy(true);setError('');
+    try{
+      const body=new FormData();body.append('name',newCharacterName.trim());body.append('description',newCharacterDescription.trim());body.append('image',newCharacterImage);
+      const response=await api('/api/artifacts/characters/',{method:'POST',body});
+      await refreshCharacters();setSelectedCharacter(String(response.profile.id));setNewCharacterName('');setNewCharacterDescription('');setNewCharacterImage(null);
+      setArtifactStatus('Character anchor saved privately.');
+    }catch(e){setError(String(e));}finally{setCharacterBusy(false);}
+  }
+  async function deleteCharacter(id:number){
+    try{await api(`/api/artifacts/characters/${id}/`,{method:'DELETE'});if(selectedCharacter===String(id))setSelectedCharacter('');await refreshCharacters();}catch(e){setError(String(e));}
+  }
+  async function refreshArtifacts(){
+    const response=await api('/api/artifacts/');setArtifacts(response.artifacts||[]);
+  }
+  async function refreshGenerationJobs(){
+    const result=await api('/api/artifacts/jobs/');
+    const jobs:GenerationJob[]=result.jobs||[];
+    setGenerationJobs(jobs);
+    const active=jobs.some(j=>j.status==='queued'||j.status==='running');
+    setArtifactBusy(active);
+    const latest=jobs[0];
+    if(latest?.status==='completed')setArtifactStatus('Completed — artifact available below.');
+    if(latest?.status==='failed')setArtifactStatus('Generation failed: '+latest.error);
+    if(latest?.status==='running'||latest?.status==='queued')setArtifactStatus(latest.stage);
+    if(latest?.status==='completed')await refreshArtifacts();
+  }
+  async function generateArtifact(){
+    if(artifactBusy||artifactPrompt.trim().length<5)return;
+    setArtifactBusy(true);setArtifactStatus('Queuing generation...');setError('');
+    try{
+      const body=new FormData();
+      body.append('prompt',artifactPrompt.trim());
+      body.append('provider',provider);
+      body.append('format',artifactFormat);
+      body.append('reference_handling',referenceHandling);
+      body.append('reference_controls',JSON.stringify({preset:referencePreset,references:artifactFiles.map((f,i)=>({name:f.name,roles:referenceWeights[i]??presetWeights[referencePreset]}))}));
+      body.append('character_lock',String(characterLock));
+      if(selectedCharacter)body.append('character_id',selectedCharacter);
+      if(artifactFormat==='video_clip'||artifactFormat==='video_reel')body.append('duration',(artifactFormat==='video_reel'&&!['30','60'].includes(videoDuration))?'30':(artifactFormat==='video_clip'&&!['5','8','10','15'].includes(videoDuration))?'8':videoDuration);
+      if(activeId!==null)body.append('conversation_id',String(activeId));
+      for(const file of artifactFiles)body.append('files',file);
+      await api('/api/artifacts/jobs/',{method:'POST',body});
+      setArtifactStatus('Queued — waiting for the generation worker.');
+      await refreshGenerationJobs();
+    }catch(e){setArtifactStatus('');setError(String(e));setArtifactBusy(false);}
+  }
+  async function cancelGenerationJob(id:number){
+    try{await api(`/api/artifacts/jobs/${id}/`,{method:'DELETE'});await refreshGenerationJobs();}catch(e){setError(String(e));}
+  }
+  const displayElapsed=(
+    start:string|null,
+    end:string|null
+  ):string=>{
+    if(!start)return '00:00';
+
+    const startMs=Date.parse(start);
+    const endMs=end?Date.parse(end):clockNow;
+
+    if(!Number.isFinite(startMs)||!Number.isFinite(endMs)){
+      return '00:00';
+    }
+
+    const totalSeconds=Math.max(
+      0,
+      Math.floor((endMs-startMs)/1000)
+    );
+
+    const hours=Math.floor(totalSeconds/3600);
+    const minutes=Math.floor((totalSeconds%3600)/60);
+    const seconds=totalSeconds%60;
+
+    if(hours>0){
+      return `${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
+    }
+
+    return `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
+  };
+  async function validateZipProject(a:Artifact){
+    if(zipValidating!==null)return;
+    setZipValidating(a.id);
+    setZipValidationErrors(v=>({...v,[a.id]:''}));
+    try{
+      const result=await api(`/api/artifacts/${a.id}/validate-project/`,{method:'POST'});
+      setZipReports(v=>({...v,[a.id]:result.report as ZipValidationReport}));
+    }catch(e){setZipValidationErrors(v=>({...v,[a.id]:String(e)}));}
+    finally{setZipValidating(null);}
+  }
+  async function downloadZipReport(a:Artifact){
+    try{
+      await keycloak.updateToken(30);
+      const response=await fetch(API+`/api/artifacts/${a.id}/validate-project/`,{headers:{Authorization:`Bearer ${keycloak.token}`}});
+      if(!response.ok)throw new Error('Report download failed: HTTP '+response.status);
+      const blob=await response.blob();const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=url;link.download=a.filename.replace(/\.zip$/i,'')+'.validation.md';document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),30000);
+    }catch(e){setZipValidationErrors(v=>({...v,[a.id]:String(e)}));}
+  }
+  async function downloadArtifact(a:Artifact){
+    try{
+      await keycloak.updateToken(30);
+      const r=await fetch(API+a.download_path,{headers:{Authorization:`Bearer ${keycloak.token}`}});
+      if(!r.ok)throw new Error('Download failed: HTTP '+r.status);
+      const blob=await r.blob();const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=url;link.download=a.filename;document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),30000);
+    }catch(e){setError(String(e));}
+  }
+  async function closePreview(){
+    if(previewSrc)URL.revokeObjectURL(previewSrc);
+    setPreviewArtifactId(null);setPreviewType(null);setPreviewSrc('');setPreviewText('');setPreviewNote('');
+  }
+  async function openPreview(a:Artifact){
+    if(previewArtifactId===a.id){void closePreview();return;}
+    await closePreview();
+    setPreviewArtifactId(a.id);setPreviewLoading(true);setError('');
+    try{
+      if(['word','excel','powerpoint'].includes(a.format)){
+        const p=await api(`/api/artifacts/${a.id}/preview/`);
+        setPreviewType('text');setPreviewText(p.text||'(No extractable text)');setPreviewNote(p.note+(p.truncated?' Preview truncated.':''));
+      }else{
+        await keycloak.updateToken(30);
+        const r=await fetch(API+a.download_path,{headers:{Authorization:`Bearer ${keycloak.token}`}});
+        if(!r.ok)throw new Error('Preview could not be loaded: HTTP '+r.status);
+        const blob=await r.blob();
+        if(a.format==='image'){
+          setPreviewSrc(URL.createObjectURL(new Blob([blob],{type:'image/png'})));setPreviewType('image');
+        }else if(a.format==='video'){
+          setPreviewSrc(URL.createObjectURL(new Blob([blob],{type:'video/mp4'})));setPreviewType('video');
+        }else if(a.format==='pdf'){
+          setPreviewSrc(URL.createObjectURL(new Blob([blob],{type:'application/pdf'})));setPreviewType('pdf');
+        }else if(['python','typescript','javascript','html','css','sql','json','yaml','markdown','text','csv'].includes(a.format)){
+          const t=await blob.text();setPreviewText(t.slice(0,60000));setPreviewType('text');
+          if(t.length>60000)setPreviewNote('Preview truncated to 60,000 characters. Download the complete file.');
+        }else{
+          setPreviewNote('No built-in preview for this format. Download to open it.');
+        }
+      }
+    }catch(e){setError(String(e));setPreviewArtifactId(null);}
+    finally{setPreviewLoading(false);}
+  }
+  async function deleteArtifact(id:number){
+    if(!window.confirm('Delete this generated file?'))return;
+    try{if(previewArtifactId===id)await closePreview();await api(`/api/artifacts/${id}/`,{method:'DELETE'});await refreshArtifacts();}catch(e){setError(String(e));}
+  }
+  useEffect(()=>{void refreshArtifacts().catch(e=>setError(String(e)));void refreshCharacters().catch(e=>setError(String(e)));},[]);
+  useEffect(()=>{void refreshGenerationJobs().catch(e=>setError(String(e)));},[]);
+  // Update the visible elapsed timer every second.
+  useEffect(()=>{
+    const timer=window.setInterval(()=>{
+      setClockNow(Date.now());
+    },1000);
+
+    return ()=>window.clearInterval(timer);
+  },[]);
+
+  // Fetch actual generation status separately.
+  useEffect(()=>{
+    const timer=window.setInterval(()=>{
+      void refreshGenerationJobs().catch(console.error);
+    },2500);
+
+    return ()=>window.clearInterval(timer);
+  },[]);
+  async function selectConversation(id: number) {
+    if (busy) return;
+
+    setError('');
+    setActiveId(id);
+    setMessages([]);
+    setStreamText('');
+    setPendingQuestion('');
+    setChatFiles([]);
+    setStreamSources([]);
+    setStreamStatus('');
+    setToolStatus('');
+
+    try {
+      const result = await api(
+        `/api/chat/conversations/${id}/`
+      );
+
+      setMessages(result.messages);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+   async function send(){
+     if(busy||(question.trim().length<2 && !chatFiles.length))return;
+     const text=question.trim()||'Please analyze the selected file(s).';const requestFiles=[...chatFiles];setBusy(true);setError('');setNotice('');setMemoryFeedback('');
+     setPendingQuestion(text+((requestFiles.length)?'\n[Files: '+requestFiles.map(f=>f.name).join(', ')+']':''));setStreamText('');setStreamSources([]);setStreamStatus('Connecting...');setToolStatus('');setQuestion('');
+     let completed=false;
+     try{
+       await keycloak.updateToken(30);
+       const form=new FormData();
+       form.append('question',text); form.append('provider',provider);form.append('mode',mode);
+       if(activeId!==null) form.append('conversation_id',String(activeId));
+       requestFiles.forEach(f=>form.append('files',f));
+       const response=await fetch(API+'/api/chat/ask-stream/',{
+         method:'POST',headers:{'Accept':'text/event-stream','Authorization':`Bearer ${keycloak.token}`},
+         body:form
+       });
+       if(!response.ok){
+         const body=await response.json().catch(()=>({}));
+         throw new Error(`${response.status}: ${typeof body.detail==='string'?body.detail:JSON.stringify(body.detail??body)}`);
+       }
+       if(!response.body)throw new Error('Browser did not provide a streaming response');
+       const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';
+       const handleEvent=(frame:string)=>{
+         let event='message';const dataLines:string[]=[];
+         for(const line of frame.split('\n')){
+           if(line.startsWith('event:'))event=line.slice(6).trim();
+           if(line.startsWith('data:'))dataLines.push(line.slice(5).trimStart());
+         }
+         if(!dataLines.length)return;
+         const payload=JSON.parse(dataLines.join('\n'));
+         if(event==='status')setStreamStatus(payload.message||'Working...');
+         if(event==='tool')setToolStatus(`${payload.name}: ${payload.status}`);
+         if(event==='sources')setStreamSources(payload.sources||[]);
+         if(event==='token')setStreamText(v=>v+(payload.text||''));
+         if(event==='memory_saved'){
+           const saved=Array.isArray(payload.memories)?payload.memories:[];
+           if(saved.length){
+             setMemories(previous=>{const seen=new Set(previous.map(m=>m.id));return [...saved.filter((m:Memory)=>!seen.has(m.id)),...previous];});
+             setMemoryFeedback(`${saved.length} new memor${saved.length===1?'y':'ies'} saved automatically.`);
+           }
+         }
+         if(event==='error')throw new Error(payload.detail||'Chat streaming failed');
+         if(event==='done'){
+           completed=true;
+           setActiveId(payload.conversation.id);
+           setMessages(v=>[...v,payload.user_message,payload.assistant_message]);
+           setStreamText('');setStreamSources([]);setPendingQuestion('');setStreamStatus('');setChatFiles([]);
+         }
+       };
+       try{
+         while(true){
+           const {done,value}=await reader.read();if(done)break;
+           buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,'\n');
+           let index;
+           while((index=buffer.indexOf('\n\n'))!==-1){
+             const frame=buffer.slice(0,index);buffer=buffer.slice(index+2);
+             if(frame.trim())handleEvent(frame);
+           }
+         }
+         buffer+=decoder.decode();
+         if(buffer.trim())handleEvent(buffer);
+       }finally{reader.releaseLock();}
+       if(!completed)throw new Error('Connection closed before the answer was saved');
+       await refresh();
+     }catch(e){setError(String(e));setQuestion(text);}
+     finally{setBusy(false);setStreamStatus('');if(!completed){setStreamText('');setStreamSources([]);setPendingQuestion('');}}
+   }
+  async function upload(){if(!file||busy)return;setBusy(true);setError('');setNotice('Indexing document...');
+    try{const form=new FormData();form.append('file',file);const result=await api('/api/knowledge/documents/',{method:'POST',body:form});
+      setNotice(result.status==='ready'?`Indexed ${result.chunk_count} chunks`:`Indexing failed: ${result.error}`);setFile(null);
+      const input=document.getElementById('doc-file') as HTMLInputElement|null;if(input)input.value='';await refresh();
+    }catch(e){setError(String(e));setNotice('');}finally{setBusy(false);}}
+  async function removeDoc(id:number){if(!window.confirm('Delete this document and its chunks?'))return;
+    try{await api(`/api/knowledge/documents/${id}/`,{method:'DELETE'});await refresh();setResults([]);}catch(e){setError(String(e));}}
+  async function removeChat(id:number){if(!window.confirm('Delete this conversation?'))return;
+    try{await api(`/api/chat/conversations/${id}/`,{method:'DELETE'});if(activeId===id){setActiveId(null);setMessages([]);}await refresh();}catch(e){setError(String(e));}}
+  async function changeMemoryMode(next:'manual'|'auto'){
+    try{
+      await api('/api/chat/memories/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:next})});
+      setMemoryMode(next);
+      setMemoryFeedback(next==='auto'?'Auto memory is enabled for future messages.':'Manual memory is enabled.');
+    }catch(e){setError(String(e));}
+  }
+  async function saveMemory(){
+    if(!memoryDraft.trim())return;
+    try{await api('/api/chat/memories/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:memoryDraft})});setMemoryDraft('');setMemoryFeedback('Memory saved manually.');await refresh();}catch(e){setError(String(e));}
+  }
+  async function deleteMemory(id:number){
+    if(!window.confirm('Delete this saved memory?'))return;
+    try{await api(`/api/chat/memories/${id}/`,{method:'DELETE'});await refresh();}catch(e){setError(String(e));}
+  }
+  async function search(){if(query.trim().length<2)return;setBusy(true);setError('');
+    try{const result=await api('/api/knowledge/search/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query})});setResults(result.results);}catch(e){setError(String(e));}finally{setBusy(false);}}
+  return <main className="rag-shell">
+    <header><h1>RAG Knowledge AI</h1><div className="action"><span className="muted">{keycloak.tokenParsed?.preferred_username}</span><button onClick={()=>keycloak.logout({redirectUri:'http://localhost:5174/'})}>Logout</button></div></header>
+    <nav className="tabs"><button className={tab==='chat'?'selected':''} onClick={()=>setTab('chat')}>AI Chat</button><button className={tab==='documents'?'selected':''} onClick={()=>setTab('documents')}>Knowledge Base ({docs.length})</button><button className={tab==='create'?'selected':''} onClick={()=>setTab('create')}>Create Files</button></nav>
+    {error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="notice">{notice}</p>}
+    {tab==='chat'?<div className="chat-layout"><aside className="sidebar"><div className="action"><h3>Conversations</h3><button disabled={busy} onClick={()=>{setActiveId(null);setMessages([]);setChatFiles([]);setStreamSources([]);setStreamStatus('');setToolStatus('');setStreamText('');setPendingQuestion('');setError('');}}>+ New</button></div>
+      {conversations.map(c=><div className={`chat-row ${activeId===c.id?'active':''}`} key={c.id}><button className="chat-link" disabled={busy} onClick={()=>void selectConversation(c.id)}>{c.title}</button><button className="delete-small" disabled={busy} title="Delete conversation" onClick={()=>void removeChat(c.id)}>×</button></div>)}
+      {!conversations.length&&<p className="muted">No previous conversations</p>}</aside>
+      <section className="chat-panel"><h2>Conversation History & AI Memory</h2><div className="action"><label>Provider <select value={provider} disabled={busy} onChange={e=>setProvider(e.target.value as 'ollama'|'openai')}><option value="ollama">Ollama · Local</option><option value="openai">OpenAI · API</option></select></label><label>Mode <select value={mode} disabled={busy} onChange={e=>setMode(e.target.value as 'auto'|'rag'|'agent')}><option value="auto">Auto · Smart routing</option><option value="rag">Standard RAG</option><option value="agent">Agentic · Read-only</option></select></label></div><p className="muted">{mode==='auto'?'Auto chooses between general AI knowledge and your indexed documents. Web search is disabled; document citations appear when used.':mode==='rag'?'Answers use only authorized uploaded documents, with source citations.':'Agentic mode chooses a read-only tool: knowledge search or calculator.'}</p>
+        <div className="message-list">{messages.length?messages.map(m=><div className={`message ${m.role}`} key={m.id}><div className="message-label">{m.role==='assistant'?'AI Assistant':'You'}{m.model&&<small> · {m.model}</small>}</div><p>{m.content}</p>{m.sources?.length>0&&<details><summary>Sources ({m.sources.length})</summary>{m.sources.map((s,i)=><div className="source" key={`${s.document_id}-${s.chunk_index}-${i}`}><strong>[{i+1}] {s.filename}</strong><small> · chunk {s.chunk_index}{s.page?` · page ${s.page}`:''} · similarity {s.similarity}</small><p>{s.excerpt}</p></div>)}</details>}</div>):!busy?<div className="chat-empty">Ask about your documents or request general AI help. For example: <em>Which technology handles authentication?</em></div>:null}{pendingQuestion&&<div className="message user"><div className="message-label">You</div><p>{pendingQuestion}</p></div>}{busy&&<div className="message assistant" aria-live="polite"><div className="message-label">AI Assistant · {streamStatus||'Working...'}</div><p>{streamText||'Please wait...'}{toolStatus&&<small> · Tool: {toolStatus}</small>}</p>{streamSources.length>0&&<details><summary>Sources ({streamSources.length})</summary>{streamSources.map((src,i)=><div className="source" key={i}><strong>[{i+1}] {src.filename}</strong><small> · chunk {src.chunk_index} · similarity {src.similarity}</small><p>{src.excerpt}</p></div>)}</details>}</div>}</div>
+         <div style={{padding:'8px 14px',borderTop:'1px solid #dce7f0'}}>
+           <label style={{display:'inline-flex',gap:8,alignItems:'center',fontSize:13}}>📎 Attach files (max 3 × 5 MB)
+             <input aria-label="Attach chat files" type="file" multiple disabled={busy} onChange={e=>{
+               const selected=Array.from(e.target.files||[]);setChatFiles(selected); e.target.value='';
+             }} />
+           </label>
+           {chatFiles.length>0&&<div style={{fontSize:12,marginTop:5}}>{chatFiles.map((f,i)=><span key={i} style={{display:'inline-block',padding:5,marginRight:6,background:'#edf2f8',borderRadius:5}}>{f.name} ({(f.size/1024).toFixed(0)} KB) <button disabled={busy} type="button" onClick={()=>setChatFiles(v=>v.filter((_,j)=>j!==i))}>×</button></span>)}</div>}
+           <small style={{display:'block',marginTop:5,color:'#64748b'}}>Chat attachments are temporary. Original uploaded files are not stored; source excerpts may remain in saved messages. Use Knowledge Base for persistent document indexing.</small>
+           <div style={{marginTop:10,background:'#f6f8fc',padding:8,borderRadius:6}}>
+             <strong>AI Memory ({memories.length})</strong> <small>· private to your account</small>
+             <div style={{display:'flex',gap:10,alignItems:'center',marginTop:7,marginBottom:5}}>
+               <label htmlFor="memory-mode">Memory mode</label>
+               <select id="memory-mode" value={memoryMode} disabled={busy} onChange={e=>void changeMemoryMode(e.target.value as 'manual'|'auto')}>
+                 <option value="manual">Manual</option><option value="auto">Auto</option>
+               </select>
+             </div>
+             <small style={{display:'block',color:'#64748b',marginBottom:6}}>{memoryMode==='auto'?'Auto saves clear, non-sensitive facts explicitly stated in your messages. Temporary files and AI replies are excluded. Review or delete memories below.':'Manual only saves memories when you click Remember.'}</small>
+             {memoryMode==='manual'&&<div style={{display:'flex',gap:5,marginTop:5}}><input aria-label="New memory" style={{flex:1,minWidth:0}} value={memoryDraft} onChange={e=>setMemoryDraft(e.target.value)} placeholder="Remember: My project uses Keycloak..." maxLength={1200}/><button disabled={busy||memoryDraft.trim().length<3} onClick={()=>void saveMemory()}>Remember</button></div>}
+             {memoryMode==='auto'&&<small style={{display:'block',color:'#166534',marginTop:5}}>✓ Auto memory enabled — no manual entry needed. New memories are created only when a message clearly states a reusable fact.</small>}
+             {memoryFeedback&&<div role="status" aria-live="polite" style={{fontSize:12,color:'#166534',marginTop:6}}>{memoryFeedback}</div>}
+             <details style={{marginTop:8}}><summary style={{cursor:'pointer',fontSize:12,fontWeight:600}}>Saved memories ({memories.length})</summary>
+               <div style={{maxHeight:140,overflowY:'auto',marginTop:5}}>{memories.length===0&&<small>No long-term memories saved yet.</small>}{memories.map(m=><div key={m.id} style={{display:'flex',justifyContent:'space-between',gap:5,fontSize:12,marginBottom:5}}><span style={{overflowWrap:'anywhere'}}>{m.content}</span><button type="button" title="Delete memory" aria-label={`Delete memory ${m.id}`} disabled={busy} onClick={()=>void deleteMemory(m.id)}>×</button></div>)}</div>
+             </details>
+           </div>
+         </div>
+         <div className="chat-entry"><textarea aria-label="Your question" rows={3} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}} placeholder="Ask a general question or about your documents..."/><button disabled={busy||(question.trim().length<2&&!chatFiles.length)} onClick={()=>void send()}>{busy?'Streaming...':'Send'}</button></div>
+      </section></div>:tab==='create'?<section><h2>AI File Generation</h2>
+        <p className="muted">Generate actual downloadable code and files. The output is stored privately for your account. Image creation requires an OpenAI image API key; motion clips/reels from still images are available; Generate individual files or complete multi-file ZIP projects.</p>
+        <article><h3>Create an artifact</h3>
+          <div className="action"><label>AI Provider <select value={provider} disabled={artifactBusy} onChange={e=>setProvider(e.target.value as 'ollama'|'openai')}><option value="ollama">Ollama</option><option value="openai">OpenAI</option></select></label>
+          <label>File format <select value={artifactFormat} disabled={artifactBusy} onChange={e=>setArtifactFormat(e.target.value)}>{[{v:'auto',t:'Auto select'},{v:'python',t:'Python .py'},{v:'typescript',t:'React/TSX'},{v:'javascript',t:'JavaScript'},{v:'html',t:'HTML'},{v:'css',t:'CSS'},{v:'sql',t:'SQL'},{v:'json',t:'JSON'},{v:'yaml',t:'YAML'},{v:'markdown',t:'Markdown'},{v:'excel',t:'Excel .xlsx'},{v:'csv',t:'CSV'},{v:'word',t:'Word .docx'},{v:'pdf',t:'PDF'},{v:'powerpoint',t:'PowerPoint'},{v:'zip',t:'ZIP Project .zip'},{v:'image',t:'Image .png'},{v:'video_clip',t:'Motion Clip .mp4'},{v:'video_reel',t:'Auto Reel .mp4'}].map(x=><option key={x.v} value={x.v}>{x.t}</option>)}</select></label></div>
+          {(artifactFormat==='video_clip'||artifactFormat==='video_reel')&&<div style={{marginTop:12,padding:10,background:'#eff6ff',borderRadius:8}}>
+            <label>Duration <select value={(artifactFormat==='video_clip'?['5','8','10','15']:['30','60']).includes(videoDuration)?videoDuration:(artifactFormat==='video_clip'?'8':'30')} onChange={e=>setVideoDuration(e.target.value)}>{(artifactFormat==='video_clip'?['5','8','10','15']:['30','60']).map(n=><option key={n} value={n}>{n} seconds</option>)}</select></label>
+            <p className="muted">Creates a silent MP4 from up to 3 uploaded still images, with slow camera motion. Without images, OpenAI can generate one still first. This is video assembly, not native motion generation.</p>
+          </div>}
+          {(['image','video_clip','video_reel'].includes(artifactFormat))&& (
+          <div style={{marginTop:12,padding:14,background:'#f4f7fc',border:'1px solid #d7e1ed',borderRadius:9}}>
+            <strong>Blended image & video references</strong>
+            <p className="muted">Identity, visual style, composition and scene are used together. Adjust the blend, or leave the Balanced preset.</p>
+            <div className="action" style={{marginTop:10,flexWrap:'wrap'}}>
+              <label>Guidance preset <select value={referencePreset} onChange={e=>{const val=e.target.value as typeof referencePreset;setReferencePreset(val);setReferenceWeights(artifactFiles.map(()=>({...presetWeights[val]})));}}>
+                <option value="balanced">Balanced (default)</option><option value="identity">Identity priority</option><option value="style">Style priority</option><option value="creative">Creative freedom</option>
+              </select></label>
+              <label>New reference handling <select value={referenceHandling} onChange={e=>setReferenceHandling(e.target.value)}>
+                <option value="temporary">Use this generation only</option><option value="combine">Combine with saved character</option><option value="replace">Replace anchor for this generation</option><option value="new">Different character / ignore saved identity</option>
+              </select></label>
+              <label style={{display:'flex',alignItems:'center',gap:7}}><input type="checkbox" checked={characterLock} onChange={e=>setCharacterLock(e.target.checked)}/> Prioritize identity consistency</label>
+            </div>
+            {artifactFiles.filter(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name)).length>0&&<p className="muted">Set separate identity, style, composition and scene emphasis for each image under Attachments below.</p>}
+            <p className="muted" style={{margin:'8px 0'}}>All four roles are active together. The identity toggle prioritizes character continuity when appropriate; your prompt can still change outfit, pose and background. Motion MP4 uses FFmpeg camera movement from still images.</p>
+            <label>Saved character <select disabled={artifactBusy} value={selectedCharacter} onChange={e=>setSelectedCharacter(e.target.value)}>
+              <option value="">None — use uploaded references</option>{characters.map(c=><option key={c.id} value={String(c.id)}>{c.name}</option>)}
+            </select></label>
+            {selectedCharacter&&<button type="button" style={{marginLeft:10}} disabled={characterBusy} onClick={()=>void deleteCharacter(Number(selectedCharacter))}>Delete selected profile</button>}
+            <details style={{marginTop:10}}><summary>Save a new character profile</summary>
+              <div style={{display:'grid',gap:8,marginTop:10}}>
+                <input aria-label="Character name" value={newCharacterName} maxLength={100} placeholder="Character name (e.g. Firefly)" onChange={e=>setNewCharacterName(e.target.value)}/>
+                <textarea aria-label="Character description" rows={3} maxLength={1800} placeholder="Identity notes: hair, eyes, outfit, accessories..." value={newCharacterDescription} onChange={e=>setNewCharacterDescription(e.target.value)}/>
+                <label>Character image (PNG/JPG/WebP, up to 8MB) <input type="file" accept=".png,.jpg,.jpeg,.webp" onChange={e=>setNewCharacterImage(e.target.files?.[0]||null)}/></label>
+                <button type="button" disabled={!newCharacterName.trim()||!newCharacterImage||characterBusy} onClick={()=>void saveCharacter()}>{characterBusy?'Saving...':'Save character anchor'}</button>
+              </div>
+            </details>
+          </div>
+          )}
+          <label htmlFor="artifact-prompt" style={{display:'block',fontWeight:600,marginTop:14,marginBottom:7}}>Describe what you want to create</label>
+          <textarea id="artifact-prompt" aria-label="File generation prompt" rows={10} maxLength={2500} style={{display:'block',boxSizing:'border-box',width:'100%',minWidth:0,minHeight:240,padding:14,fontSize:15,lineHeight:1.55,resize:'vertical',border:'1px solid #bdcddd',borderRadius:8,fontFamily:'inherit'}} value={artifactPrompt} onChange={e=>setArtifactPrompt(e.target.value)} placeholder="Describe the file you want to create, its content, purpose, layout, functionality, or visual style. You can attach documents, reference images, audio or short videos below..."/>
+          <div style={{textAlign:'right',fontSize:12,color:'#64748b',marginTop:4}}>{artifactPrompt.length}/2500 characters</div>
+          <div style={{marginTop:12,marginBottom:12,padding:12,background:'#f5f8fc',borderRadius:8}}>
+            <label htmlFor="artifact-reference-files" style={{display:'block',fontWeight:600,marginBottom:7}}>📎 Reference attachments (optional)</label>
+            <input id="artifact-reference-files" aria-label="Attach reference documents" type="file" multiple disabled={artifactBusy} accept=".txt,.md,.csv,.json,.yaml,.yml,.py,.js,.ts,.tsx,.html,.css,.sql,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.flac,.ogg,.mp4,.mov,.webm" onChange={e=>{
+              const added=Array.from(e.target.files||[]);
+              if(added.some(f=>f.size>(/\.(mp3|wav|m4a|flac|ogg|mp4|mov|webm)$/i.test(f.name)?20:/\.(png|jpg|jpeg|webp)$/i.test(f.name)?8:5)*1024*1024)){setError('Attachment exceeds its size limit: documents 5 MB, images 8 MB, audio/video 20 MB.');e.target.value='';return;}
+              if(artifactFiles.length+added.length>3){setError('You can attach up to 3 reference files.');e.target.value='';return;}
+              setArtifactFiles(old=>[...old,...added]);setReferenceWeights(old=>[...old,...added.map(()=>({...presetWeights[referencePreset]}))]);setError('');e.target.value='';
+            }}/>
+            {artifactFiles.length>0&&<div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:9}}>{artifactFiles.map((f,i)=><span key={`${f.name}-${i}`} style={{background:'#e6edf5',padding:'5px 9px',borderRadius:6,fontSize:12}}>{f.name} ({(f.size/1024).toFixed(1)} KB) <button type="button" disabled={artifactBusy} onClick={()=>{setArtifactFiles(old=>old.filter((_,j)=>i!==j));setReferenceWeights(old=>old.filter((_,j)=>i!==j));}}>×</button></span>)}</div>}
+            {artifactFiles.map((f,i)=>/\.(png|jpg|jpeg|webp)$/i.test(f.name)&&<div key={`roles-${i}`} style={{marginTop:10,padding:10,background:'#fff',borderRadius:8,border:'1px solid #dbe3ee'}}>
+              <strong>{f.name} — blended guidance</strong>
+              {roles.map(role=><label key={role} style={{display:'flex',alignItems:'center',gap:10,marginTop:7}}>
+                <span style={{minWidth:102,textTransform:'capitalize'}}>{role}</span>
+                <input type="range" min="0" max="100" step="5" value={(referenceWeights[i]??presetWeights[referencePreset])[role]??0} onChange={e=>setReferenceWeights(old=>artifactFiles.map((_,j)=>j===i?{...(old[j]??presetWeights[referencePreset]),[role]:Number(e.target.value)}:(old[j]??{...presetWeights[referencePreset]})))} />
+                <span>{(referenceWeights[i]??presetWeights[referencePreset])[role]??0}%</span>
+              </label>)}
+            </div>)}
+            <small style={{display:'block',marginTop:7,color:'#64748b'}}>Up to 3 files: documents 5 MB, images 8 MB, audio/video 20 MB each. OpenAI supports reference images, speech transcription and video frame analysis. Motion clips/reels use uploaded still images (or one AI-generated still) and require FFmpeg in Docker. Originals are not stored.</small>
+          </div>
+          <div className="action"><button disabled={artifactBusy||artifactPrompt.trim().length<5} onClick={()=>void generateArtifact()}>{artifactBusy?'Generating...':'Generate file'}</button><span className="muted">{artifactStatus}</span></div>
+          <small>Generated code is not executed. Review and test it before use.Generate individual files or multi-file ZIP projects. Review generated code and test projects before use.</small>
+          <div style={{marginTop:12}} aria-live="polite">
+            <strong>Generation progress &amp; recent jobs</strong>
+            {generationJobs.length===0&&<p className="muted">No generation jobs yet.</p>}
+            {generationJobs.slice(0,8).map(job=><div key={job.id} style={{border:'1px solid #dbe5f2',borderRadius:8,padding:10,marginTop:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
+                <strong>#{job.id} — {job.status}</strong><span>Elapsed {displayElapsed(job.started_at || job.created_at,job.finished_at)}</span>
+              </div>
+              <div style={{fontSize:13,marginTop:4}}>{job.stage}</div>
+              {job.status==='running'&&<progress style={{width:'100%',marginTop:6}} value={job.percent??0} max={100} aria-label="Completed workflow milestones" />}
+              {job.status!=='running'&&<progress style={{width:'100%',marginTop:6}} value={job.percent??0} max={100} />}
+              <div style={{fontSize:12}}>{job.status==='running'?`${job.percent??0}% — completed workflow milestones (not model thinking)`:`${job.percent??0}%`}</div>
+              {job.error&&<div style={{color:'#ba2525',overflowWrap:'anywhere'}}>Error: {job.error}</div>}
+              {['queued','running'].includes(job.status)&&<button type="button" onClick={()=>void cancelGenerationJob(job.id)}>Request cancel</button>}
+              {job.status==='completed'&&<span> File ready in My generated files.</span>}
+            </div>)}
+          </div>
+
+        </article><article><h3>My generated files ({artifacts.length})</h3>{artifacts.length===0&&<p className="muted">No artifacts yet.</p>}{artifacts.map(a=><div className="doc" key={a.id}><div><strong>{a.filename}</strong><p className="muted">{a.format} · {(a.byte_size/1024).toFixed(1)} KB · {new Date(a.created_at).toLocaleString()}</p></div><div className="action"><button type="button" onClick={()=>void openPreview(a)}>{previewArtifactId===a.id?'Hide preview':'Preview'}</button>{(a.format==='zip'||a.filename.toLowerCase().endsWith('.zip'))&&<button type="button" disabled={zipValidating!==null} onClick={()=>void validateZipProject(a)}>{zipValidating===a.id?'Validating...':'Validate Project'}</button>}<button onClick={()=>void downloadArtifact(a)}>Download</button><button onClick={()=>void deleteArtifact(a.id)}>Delete</button></div>
+          {zipValidationErrors[a.id]&&<div role="alert" style={{flexBasis:'100%',color:'#ba2525',overflowWrap:'anywhere'}}>{zipValidationErrors[a.id]}</div>}
+            {zipReports[a.id]&&<div style={{flexBasis:'100%',padding:12,marginTop:8,background:'#f5f8fc',border:'1px solid #d7e0ea',borderRadius:8}}>
+              <strong>Project validation: {zipReports[a.id].summary.error} errors · {zipReports[a.id].summary.warning} warnings · {zipReports[a.id].summary.info} info</strong>
+              <p className="muted">{zipReports[a.id].files_analyzed} files checked · Static analysis only; project code was not executed.</p>
+              {zipReports[a.id].findings.length===0?<p>No findings from the implemented checks.</p>:<ul>{zipReports[a.id].findings.map((f,i)=><li key={i}><strong>{f.severity.toUpperCase()}</strong> · {f.file||'(project)'} · {f.message}</li>)}</ul>}
+              <details><summary>Validation limitations</summary><ul>{zipReports[a.id].limitations.map((s,i)=><li key={i}>{s}</li>)}</ul></details>
+              <button type="button" onClick={()=>void downloadZipReport(a)}>Download report (.md)</button>
+            </div>}
+            {previewArtifactId===a.id&&<div style={{flexBasis:'100%',width:'100%',marginTop:12,padding:14,background:'#f8fafc',border:'1px solid #d7e0ea',borderRadius:8,boxSizing:'border-box'}}>
+            <strong>Preview: {a.filename}</strong>
+            {previewLoading&&<p className="muted">Loading preview...</p>}
+            {previewType==='image'&&previewSrc&&<img src={previewSrc} alt={`Preview of ${a.filename}`} style={{display:'block',width:'100%',maxHeight:620,objectFit:'contain',marginTop:10}}/>}
+            {previewType==='video'&&previewSrc&&<video controls playsInline src={previewSrc} style={{width:'100%',maxHeight:540,marginTop:10}}/>}
+            {previewType==='pdf'&&previewSrc&&<iframe title={`PDF preview of ${a.filename}`} src={previewSrc} style={{width:'100%',height:560,border:'1px solid #cbd5e1',marginTop:10}}/>}
+            {previewType==='text'&&<pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:520,overflow:'auto',fontSize:13,lineHeight:1.5,background:'#fff',padding:12,border:'1px solid #e2e8f0',borderRadius:6}}>{previewText}</pre>}
+            {previewNote&&<p className="muted">{previewNote}</p>}
+          </div>}</div>)}</article>
+      </section>:
+      <section><h2>Knowledge Base</h2><article><h3>Upload knowledge document</h3><p className="muted">Text-based PDF, DOCX, TXT or Markdown • max 10 MB</p><div className="action"><input id="doc-file" type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>setFile(e.target.files?.[0]??null)}/><button disabled={!file||busy} onClick={()=>void upload()}>{busy?'Indexing...':'Upload & index'}</button></div></article>
+      <article><h3>My documents ({docs.length})</h3>{docs.map(d=><div className="doc" key={d.id}><div><strong>{d.filename}</strong><p className="muted">{d.status} · {d.chunk_count} chunks · {d.embedding_model} · {(d.byte_size/1024).toFixed(1)} KB</p>{d.error&&<p className="error">{d.error}</p>}</div><button onClick={()=>void removeDoc(d.id)}>Delete</button></div>)}{docs.length===0&&<p className="muted">No indexed documents yet</p>}</article>
+      <article><h3>Test semantic retrieval</h3><div className="action"><input className="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search document content"/><button disabled={busy||query.trim().length<2} onClick={()=>void search()}>Search</button></div>{results.map((m,i)=><div className="match" key={i}><strong>{m.filename}{m.page?` · p.${m.page}`:''}</strong><small>Similarity: {m.similarity}</small><p>{m.text}</p></div>)}</article></section>}
+    <p className="muted">Local development · Keycloak-secured · RAG sources from your uploaded documents</p>
+  </main>;
+}

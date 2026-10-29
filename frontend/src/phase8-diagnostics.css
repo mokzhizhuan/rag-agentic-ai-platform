@@ -1,0 +1,22 @@
+/* Phase 8.4: Account-scoped diagnostics with no simulated backend telemetry. */
+main.rag-shell > section.diagnostics-studio{background:#fff;color:#172033;border-radius:11px 11px 0 0;min-height:calc(100vh - 150px);padding:28px clamp(16px,2.2vw,34px)}
+main.rag-shell > section.diagnostics-studio > h2{color:#172033!important;font-size:24px;font-weight:750;margin:0 0 8px}
+main.rag-shell .diagnostics-intro{color:#475569!important;font-size:13px;line-height:1.6;max-width:960px}
+main.rag-shell .diagnostics-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:18px 0}
+main.rag-shell .diagnostics-actions button{background:#343a95;color:#fff;border:1px solid #454cc3;padding:9px 15px;font-weight:650}
+main.rag-shell .diagnostics-actions button:disabled{opacity:.5}
+main.rag-shell .diagnostics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}
+main.rag-shell .diagnostics-stat{padding:18px;background:#111827;border:1px solid #344158;border-radius:9px;color:#f8fafc;min-width:0}
+main.rag-shell .diagnostics-stat span{display:block;color:#b3c4dc;font-size:12px}
+main.rag-shell .diagnostics-stat strong{display:block;font-size:28px;line-height:1.25;margin-top:7px;color:#f8fafc}
+main.rag-shell .diagnostics-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+main.rag-shell .diagnostics-card{padding:20px!important;background:#111827!important;color:#f8fafc!important;border:1px solid #344158!important;border-radius:9px;min-width:0}
+main.rag-shell .diagnostics-card h3{color:#f8fafc;margin:0 0 14px;font-size:16px}
+main.rag-shell .diagnostics-card p,main.rag-shell .diagnostics-card li{color:#cbd5e1;font-size:13px;line-height:1.6}
+main.rag-shell .diagnostics-card ul{list-style:none;padding:0;margin:0}
+main.rag-shell .diagnostics-card li{padding:9px 0;border-bottom:1px solid #303b4f;overflow-wrap:anywhere}
+main.rag-shell .diagnostics-card li:last-child{border-bottom:0}
+main.rag-shell .diagnostics-tag{display:inline-block;padding:2px 8px;background:#263347;border:1px solid #40516b;border-radius:4px;color:#e2e8f0;font-size:11px;margin-right:6px}
+main.rag-shell .diagnostics-note{margin-top:16px;padding:16px;background:#eaf0f8;border:1px solid #ccd6e4;border-radius:8px;color:#243449;font-size:13px;line-height:1.6}
+@media(max-width:1020px){main.rag-shell .diagnostics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){main.rag-shell .diagnostics-cards,main.rag-shell .diagnostics-grid{grid-template-columns:1fr}main.rag-shell>section.diagnostics-studio{padding:18px 13px}}

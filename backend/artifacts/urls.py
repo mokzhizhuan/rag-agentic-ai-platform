@@ -1,0 +1,20 @@
+from . import project_validation_views
+from django.urls import path
+from . import views
+from . import job_views
+
+from .characters import character_profiles, character_profile_detail
+
+urlpatterns = [
+    path('<int:pk>/validate-project/', project_validation_views.validate_zip_artifact),
+    path("characters/", character_profiles),
+    path("characters/<int:pk>/", character_profile_detail),
+    path('', views.artifacts),
+    path('<int:pk>/', views.artifact_detail),
+    path('<int:pk>/download/', views.download_artifact),
+    path('<int:pk>/preview/', views.preview_artifact),
+    path("jobs/failed/", job_views.remove_all_failed_generation_jobs),
+    path("jobs/<int:pk>/remove-failed/", job_views.remove_failed_generation_job),
+    path("jobs/", job_views.generation_jobs),
+    path("jobs/<int:pk>/", job_views.generation_job_detail),
+]

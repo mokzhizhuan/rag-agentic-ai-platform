@@ -1,0 +1,46 @@
+/* Phase 8.2: agentic workspace visual layer. No application state or behavior changes. */
+@media (min-width:761px){
+ main.rag-shell>.chat-layout{background:#fff;color:#172033;border-radius:10px;gap:18px;padding:25px clamp(16px,2vw,32px);grid-template-columns:clamp(215px,19vw,290px) minmax(0,1fr);align-content:start}
+}
+main.rag-shell>.chat-layout{--aw-panel:#111827;--aw-inner:#0b1220;--aw-border:#2b3950;--aw-ink:#eef2fb;--aw-muted:#afbed4;--aw-accent:#818cf8;}
+main.rag-shell>.chat-layout .sidebar,
+main.rag-shell>.chat-layout .chat-panel{background:var(--aw-panel)!important;color:var(--aw-ink)!important;border:1px solid var(--aw-border);border-radius:12px;min-width:0;box-shadow:0 8px 28px rgba(15,23,42,.12)}
+main.rag-shell>.chat-layout .sidebar{padding:18px 13px;min-height:540px}
+main.rag-shell>.chat-layout .sidebar>.action{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:3px 6px 13px;border-bottom:1px solid var(--aw-border);margin-bottom:12px}
+main.rag-shell>.chat-layout .sidebar h3{font-size:15px;line-height:1.4;font-weight:750;margin:0;color:#f8fafc}
+main.rag-shell>.chat-layout .sidebar .chat-row{margin:3px 0;padding:6px 4px;display:flex;align-items:center;gap:6px;border-radius:7px;border-bottom:1px solid rgba(148,163,184,.09)}
+main.rag-shell>.chat-layout .sidebar .chat-row.active{background:rgba(99,102,241,.17);outline:1px solid rgba(129,140,248,.25)}
+main.rag-shell>.chat-layout .sidebar .chat-link{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;color:#dfe8f5;font-weight:550;background:transparent;border:0;padding:8px 6px}
+main.rag-shell>.chat-layout .sidebar .chat-link:hover{color:#fff;background:#1e293b}
+main.rag-shell>.chat-layout .sidebar .delete-small{flex-shrink:0}
+main.rag-shell>.chat-layout .sidebar>.muted{font-size:13px;line-height:1.5;margin:12px 6px;color:var(--aw-muted)}
+main.rag-shell>.chat-layout .chat-panel{padding:22px;display:flex;flex-direction:column;min-height:560px}
+main.rag-shell>.chat-layout .chat-panel>h2{font-size:clamp(19px,1.6vw,24px);font-weight:760;letter-spacing:-.025em;margin:0 0 16px;color:#f8fafc}
+main.rag-shell>.chat-layout .chat-panel>.action{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--aw-border);border-radius:9px;background:#182336;margin-bottom:9px}
+main.rag-shell>.chat-layout .chat-panel>.action label{font-size:12px;font-weight:650;color:#d7e2f1;display:inline-flex;align-items:center;gap:8px}
+main.rag-shell>.chat-layout .chat-panel>.action select{min-width:125px;min-height:32px;padding:5px 9px;font-size:12px;border:1px solid #465671;background:#0d1727;color:#f8fafc}
+main.rag-shell>.chat-layout .chat-panel>p.muted{font-size:12px;line-height:1.55;color:var(--aw-muted);margin:0 0 15px}
+main.rag-shell>.chat-layout .message-list{height:clamp(320px,48vh,670px);min-height:320px;max-height:67vh;background:var(--aw-inner)!important;border:1px solid var(--aw-border);padding:16px;overflow-y:auto;scrollbar-color:#415371 #0b1220}
+main.rag-shell>.chat-layout .chat-empty{display:flex;align-items:center;justify-content:center;text-align:center;min-height:220px;padding:28px;color:#b6c5da!important;font-size:14px;line-height:1.6}
+main.rag-shell>.chat-layout .message{max-width:min(88%,880px);font-size:14px;line-height:1.65;overflow-wrap:anywhere}
+main.rag-shell>.chat-layout .message.user{margin-left:auto;background:#252e53;border-color:#545d9a}
+main.rag-shell>.chat-layout .message.assistant{margin-right:auto;background:#1c2a3c;border-color:#34455f}
+main.rag-shell>.chat-layout .message-label{font-weight:750;font-size:11px;color:#67e8f9;margin-bottom:5px}
+main.rag-shell>.chat-layout .message p{margin:5px 0;white-space:pre-wrap}
+main.rag-shell>.chat-layout .source{background:#142335;color:#e2e8f0;border-color:#34455f;margin:8px 0}
+main.rag-shell>.chat-layout .source small{color:#adc2dd}
+main.rag-shell>.chat-layout .chat-panel>div[style*="border-top"],main.rag-shell>.chat-layout .chat-panel>div[style*="borderTop"]{border-top-color:#334155!important}
+main.rag-shell>.chat-layout .chat-panel div[style*="background: rgb(246, 248, 252)"],
+main.rag-shell>.chat-layout .chat-panel div[style*="background: #f6f8fc"],
+main.rag-shell>.chat-layout .chat-panel div[style*="background: rgb(255, 255, 255)"],
+main.rag-shell>.chat-layout .chat-panel div[style*="background: #fff"]{background:#172234!important;border-color:#35445d;color:#edf2fa!important}
+main.rag-shell>.chat-layout .chat-panel .chat-entry{display:flex;align-items:stretch;gap:10px;margin-top:12px}
+main.rag-shell>.chat-layout .chat-panel .chat-entry textarea{flex:1;min-height:74px;max-height:220px;padding:13px 14px;background:#0b1220;color:#f8fafc;border:1px solid #43516a;border-radius:8px;resize:vertical;font-size:14px}
+main.rag-shell>.chat-layout .chat-panel .chat-entry button{min-width:78px;align-self:stretch}
+main.rag-shell>.chat-layout .chat-panel input::placeholder,main.rag-shell>.chat-layout .chat-panel textarea::placeholder{color:#aabbcf;opacity:1}
+main.rag-shell>.chat-layout .chat-panel details{border:1px solid #43516a;border-radius:8px;padding:9px 12px}
+main.rag-shell>.chat-layout .chat-panel summary{color:#e5ebfa;cursor:pointer;font-weight:650}
+main.rag-shell>.chat-layout .chat-panel a{color:#67e8f9}
+main.rag-shell>.chat-layout .chat-panel [role="alert"]{color:#fca5a5}
+@media(max-width:1050px){main.rag-shell>.chat-layout{grid-template-columns:1fr!important}main.rag-shell>.chat-layout .sidebar{min-height:0!important}main.rag-shell>.chat-layout .chat-panel{min-height:480px}}
+@media(max-width:760px){main.rag-shell>.chat-layout{background:#fff!important;padding:12px!important}main.rag-shell>.chat-layout .chat-panel{padding:15px}main.rag-shell>.chat-layout .message{max-width:96%}main.rag-shell>.chat-layout .chat-panel .chat-entry{flex-direction:column}main.rag-shell>.chat-layout .chat-panel .chat-entry button{align-self:flex-end}}

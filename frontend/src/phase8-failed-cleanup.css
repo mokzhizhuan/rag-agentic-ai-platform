@@ -1,0 +1,9 @@
+/* Phase 8.4 — owner-scoped failed-job cleanup controls */
+main.rag-shell .failed-cleanup-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+main.rag-shell .failed-cleanup-toolbar h3{margin:0}
+main.rag-shell .diagnostics-card button.failed-cleanup-one,
+main.rag-shell .diagnostics-card button.failed-cleanup-all{background:transparent!important;border:1px solid #ef7777!important;color:#ffb4b4!important;border-radius:6px;padding:5px 9px;font-size:12px;font-weight:700;cursor:pointer}
+main.rag-shell .diagnostics-card button.failed-cleanup-one{margin-left:12px}
+main.rag-shell .diagnostics-card button.failed-cleanup-one:hover,
+main.rag-shell .diagnostics-card button.failed-cleanup-all:hover{background:rgba(239,68,68,.13)!important;color:#fff!important}
+main.rag-shell .diagnostics-card button:focus-visible{outline:2px solid #ffb4b4;outline-offset:3px}

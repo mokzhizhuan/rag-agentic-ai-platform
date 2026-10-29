@@ -1,0 +1,26 @@
+{
+  "schema_version": "7.10.1",
+  "mode": "static_only_no_execution",
+  "generated_utc": "2026-10-29T07:06:50+00:00",
+  "archive_sha256": "7f536479dc257f1452d960f8d8e54cf7722ae9773e94b13c9fd591a810d7988d",
+  "files_analyzed": 5,
+  "files": [
+    "README.md",
+    "app.js",
+    "index.html",
+    "project-manifest.json",
+    "styles.css"
+  ],
+  "summary": {
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [],
+  "limitations": [
+    "This is static analysis; generated application code is never executed.",
+    "No browser rendering, package installation, database connections, or deployment are performed.",
+    "Local reference checks and configuration warnings can produce false positives.",
+    "Passing checks does not imply runtime correctness, security, or production readiness."
+  ]
+}

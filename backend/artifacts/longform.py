@@ -1,0 +1,425 @@
+"""Bounded staged generation and validation for long source files and reports.
+
+No generated code is executed. Fail closed on missing end marker, huge output,
+invalid Python/JSON, or empty sections. Provider may still produce semantic bugs.
+"""
+import ast
+import json
+import re
+from chat.providers import stream_generate
+from artifacts.progress import report_progress  # PHASE77_SECTION_PROGRESS_V1
+
+class LongformError(ValueError):
+    pass
+
+END = '<<<ARTIFACT_END>>>'
+MORE = '<<<ARTIFACT_CONTINUE>>>'
+
+
+def _ask(prompt, provider, *, system, limit=36000):
+    chunks = []
+    size = 0
+    for item in stream_generate(prompt, [], [], provider, system_override=system):
+        size += len(item)
+        if size > limit:
+            raise LongformError('Model response exceeded a safe per-step limit. Try a smaller target.')
+        chunks.append(item)
+    result = ''.join(chunks).rstrip()
+    if not result:
+        raise LongformError('The model returned an empty response.')
+    return result
+
+
+def _remove_fences(text):
+    return re.sub(r'^```[^\n]*\n|\n```\s*$', '', text.strip('\n\r'))
+
+
+def _extract_piece(raw):
+    x = raw.rstrip()
+    # Some models wrap the entire output in a fenced block.
+    # Strip the closing fence before checking for markers.
+    x = re.sub(r'\n```\s*$', '', x).rstrip()
+    if x.endswith(END):
+        return _remove_fences(x[:-len(END)]).rstrip('\r\n'), True
+    if x.endswith(MORE):
+        return _remove_fences(x[:-len(MORE)]).rstrip('\r\n'), False
+    raise LongformError('Model did not provide a completion marker. The incomplete file was not saved.')
+
+
+def _read_json_plan(prompt, provider, extension, max_units=16):
+    raw = _ask(
+        f"Plan ONE complete .{extension} source file for this request. "
+        "Return only JSON with keys 'imports' (brief description of import/header needs), "
+        "'units' (array of objects containing 'name' and 'responsibility'). "
+        f"Use 3 to {max_units} cohesive units. If Python and the user requests N classes, "
+        "give each class a separate unit; include a final tests unit if requested. "
+        "No code yet. Never claim code execution.\nREQUEST:\n" + prompt,
+        provider,
+        system='You plan code files. Reply with a valid JSON object, without code fences.',
+        limit=12000,
+    )
+    try:
+        plan = json.loads(_remove_fences(raw))
+        units = plan['units']
+        if not isinstance(units, list) or not 1 <= len(units) <= max_units:
+            raise ValueError('invalid units')
+        normalized = []
+        for unit in units:
+            name = str(unit['name']).strip()[:100]
+            purpose = str(unit['responsibility']).strip()[:500]
+            if not name or not purpose:
+                raise ValueError('empty unit')
+            normalized.append((name, purpose))
+        return str(plan.get('imports', '')).strip()[:1200], normalized
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LongformError('The AI did not return a usable code plan. No file was saved.') from exc
+
+
+def _strip_code(raw):
+    value = raw.strip()
+    match = re.fullmatch(r'```[^\n]*\n(.*?)\n```', value, flags=re.S)
+    return (match.group(1) if match else value).rstrip() + '\n'
+
+
+def _validate_and_repair_python(raw, provider, *, system, context, limit=26000, attempts=3, check=None):
+    """Try syntactic repair of one generated unit without executing any code.
+
+    Repair uses the previous draft and precise SyntaxError diagnostic so the model
+    can correct an f-string/quote rather than starting a different implementation.
+    All attempts are bounded and independently parsed before acceptance.
+    """
+    candidate = _strip_code(raw)
+    for attempt in range(attempts):
+        try:
+            validate_source(candidate, 'py')
+            if check is not None:
+                check(candidate)
+            return candidate
+        except (LongformError, SyntaxError) as exc:
+            diagnostic = str(exc)
+            if attempt == attempts - 1:
+                raise LongformError(
+                    f"Unable to repair generated Python {context} after {attempts} checks: {diagnostic}"
+                ) from exc
+            candidate = _strip_code(_ask(
+                'Repair this Python source, preserving its intended public API, names, '
+                'classes, and functionality. Fix the indicated problem; also correct any '
+                'other obvious syntax errors. Output only the COMPLETE replacement Python '
+                'source for THIS ONE UNIT. Do not add Markdown fences, commentary, or '
+                'new unrelated definitions. Do not truncate the output.\n'
+                f'UNIT: {context}\nERROR: {diagnostic}\n'
+                'SOURCE TO REPAIR:\n' + candidate,
+                provider, system=system, limit=limit,
+            ))
+    raise AssertionError('unreachable')
+
+
+def _top_level_definitions(source):
+    """Names owned by this source fragment. No generated code is executed."""
+    tree = ast.parse(source)
+    return [node.name for node in tree.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _validate_unique_fragment(source, *, previously_owned, expected=None, reserved=None):
+    """Stop cross-unit symbol overwrites before appending a generated fragment."""
+    names = _top_level_definitions(source)
+    repeated_inside = sorted({name for name in names if names.count(name) > 1})
+    overlaps = sorted(set(names) & set(previously_owned))
+    if repeated_inside or overlaps:
+        raise LongformError('Duplicate top-level definitions: ' + ', '.join(repeated_inside + overlaps))
+    if reserved:
+        overlaps_reserved = sorted(set(names) & set(reserved))
+        if overlaps_reserved:
+            raise LongformError('Header defined planned unit names: ' + ', '.join(overlaps_reserved))
+    if expected is not None:
+        if expected not in names:
+            raise LongformError(f'Expected {expected!r}, got {names!r}')
+        # Class and function units must be self-contained and must not claim
+        # ownership of an additional planned class or shared helper function.
+        extras = sorted(set(names) - {expected})
+        if extras:
+            raise LongformError(f'Unit {expected!r} also defined unrelated names: {extras!r}')
+    return names
+
+
+
+def _is_test_unit(name, purpose):
+    combined = (name + ' ' + purpose).lower()
+    return (name.lower().startswith(('unittest_', 'testsuite', 'test_suite'))
+            or 'test suite' in combined or 'unittest' in combined)
+
+
+def _validate_test_fragment(source, *, previously_owned):
+    """Allow multiple test classes, but no repeated implementation classes."""
+    names = _validate_unique_fragment(source, previously_owned=previously_owned)
+    if not names:
+        raise LongformError('Test unit contains no definitions.')
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            if not node.name.startswith('Test'):
+                raise LongformError(f'Test unit generated unrelated class {node.name!r}')
+            bases = [ast.unparse(base) for base in node.bases]
+            if not any(b == 'TestCase' or b.endswith('.TestCase') for b in bases):
+                raise LongformError(f'Test class {node.name!r} must subclass unittest.TestCase')
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.name.startswith('test_'):
+                raise LongformError(f'Test unit generated unrelated function {node.name!r}')
+    return names
+
+
+def _generate_python_by_units(prompt, provider, max_chars):
+    imports_hint, units = _read_json_plan(prompt, provider, 'py', max_units=18)
+    system = ('Write complete, executable Python source text only, without markdown fences, '
+              'end markers, placeholders, omissions, or explanatory prose. '
+              'No external actions are executed. Keep definitions independently syntactically valid.')
+    header_prompt = (
+        'Generate ONLY the opening module docstring, required imports, constants, and '
+        'small shared helper functions for one Python module. Do NOT create the planned '
+        'classes yet. Only import packages available in ordinary Python unless the user '
+        'explicitly requests dependencies. Avoid top-level execution.\n'
+        f'HEADER REQUIREMENTS: {imports_hint}\n'
+        f'PLANNED UNITS: {json.dumps(units)}\nUSER REQUEST:\n{prompt}'
+    )
+    header_raw = _ask(header_prompt, provider, system=system, limit=16000)
+    reserved = {name for name, _ in units if name.isidentifier()}
+    header = _validate_and_repair_python(
+        header_raw, provider, system=system, context='module header', limit=18000,
+        check=lambda value: _validate_unique_fragment(
+            value, previously_owned=(), reserved=reserved),
+    )
+    output = header.rstrip() + '\n\n'
+    owned = set(_top_level_definitions(header))
+    completed = []
+    for idx, (name, purpose) in enumerate(units):
+        is_test = _is_test_unit(name, purpose)
+        unit_prompt = (
+            f'Generate ONLY implementation unit {idx+1}/{len(units)} named {name!r}.\n'
+            f'PURPOSE: {purpose}\n'
+            + ('For this TEST SUITE create one or more unittest.TestCase subclasses '
+               'named TestSomething, covering the completed utility classes. '
+               'Do not create the placeholder suite name or redefine utilities.\n' if is_test else '')
+            + 'Output a FULL Python class/function or group of complete definitions. '
+            'For tests, prefer unittest.TestCase declarations without running tests at import time. '
+            'Never repeat imports or already completed classes. '
+            'Do not produce a __main__ block unless it is explicitly part of this unit. '
+            'Use other units by name where relevant.\n'
+            f'PREVIOUSLY COMPLETED UNITS: {json.dumps(completed)}\n'
+            f'COMMON HEADER:\n{header[-3500:]}\n'
+            f'ORIGINAL REQUEST:\n{prompt}'
+        )
+        def _check_unit(candidate):
+            if is_test:
+                return _validate_test_fragment(candidate, previously_owned=owned)
+            if name.isidentifier():
+                _validate_unique_fragment(candidate, previously_owned=owned, expected=name)
+            else:
+                names = _validate_unique_fragment(candidate, previously_owned=owned)
+                if not names:
+                    raise LongformError('Unit does not contain a complete Python definition')
+
+        # If full-unit syntax repair fails, regenerate a compact complete unit.
+        # Never mechanically close strings or save a partial definition.
+        try:
+            candidate = _validate_and_repair_python(
+                _ask(unit_prompt + '\nAim for 30-90 lines. Avoid multiline docstrings.',
+                     provider, system=system, limit=18000),
+                provider, system=system, context=f'unit {idx+1} ({name})',
+                limit=18000, attempts=2, check=_check_unit,
+            )
+        except LongformError as original_error:
+            compact_prompt = (
+                (f'Write compact unittest.TestCase classes for test unit {name!r}. '
+                 'Use separate TestCase subclasses named TestSomething. Do not redefine '
+                 'utility classes or helpers.\n' if is_test else
+                 f'Write ONE complete and compact Python definition named {name!r}.\n')
+                + f'RESPONSIBILITY: {purpose}\n'
+                'Target 30-65 lines, short one-line docstrings, full working methods. '
+                'Do not use multiline triple-quoted strings, placeholders, '
+                'Markdown, TODOs, or unrelated definitions. Close all strings '
+                'and brackets. Output only finished Python source.\n'
+                f'OTHER UNITS: {json.dumps(completed)}\nREQUEST: {prompt}'
+            )
+            try:
+                candidate = _validate_and_repair_python(
+                    _ask(compact_prompt, provider, system=system, limit=13000),
+                    provider, system=system,
+                    context=f'compact fallback unit {idx+1} ({name})',
+                    limit=13000, attempts=2, check=_check_unit,
+                )
+            except LongformError as fallback_error:
+                raise LongformError(
+                    f'Unit {idx+1} ({name}) failed normal and compact generation. '
+                    f'Normal: {original_error}. Compact: {fallback_error}'
+                ) from fallback_error
+        # Validate names again before assembly; this is defensive even if a
+        # later change accidentally skips the check callback during repair.
+        new_names = _check_unit(candidate)
+        owned.update(_top_level_definitions(candidate))
+        output += candidate.rstrip() + '\n\n'
+        if len(output) > max_chars:
+            raise LongformError('Generated source exceeds the configured size limit; no file was saved.')
+        completed.append(name)
+    validate_source(output, 'py')
+    # Reject duplicated definitions, which can silently overwrite prior units.
+    tree = ast.parse(output)
+    names = [n.name for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise LongformError('Generated Python repeats definitions: ' + ', '.join(duplicates[:8]))
+    return output.rstrip() + '\n'
+
+
+def generate_long_code(prompt, provider, extension, *, max_parts=9, max_chars=210000):
+    """Generate planned Python units, or validate a complete one-shot non-Python file.
+
+    No undocumented special completion marker is required. Code is NOT executed.
+    """
+    if extension == 'py':
+        return _generate_python_by_units(prompt, provider, max_chars)
+    system = ('Produce one complete source file, without Markdown fences, sentinel tokens, '
+              'preambles, or omitted sections. Output only file contents.')
+    source = _strip_code(_ask(
+        f'Generate one complete .{extension} file. If the request is too large for '
+        'a reliable single file, prefer concise working functionality rather than '
+        'unfinished output.\nREQUIREMENTS:\n' + prompt,
+        provider, system=system, limit=min(max_chars, 36000),
+    ))
+    validate_source(source, extension)
+    return source
+
+
+def validate_source(source, extension):
+    if not source.strip():
+        raise LongformError('Generated file is empty.')
+    if extension == 'py':
+        try:
+            ast.parse(source)
+        except SyntaxError as exc:
+            raise LongformError(f'Generated Python has a syntax error at line {exc.lineno}: {exc.msg}') from exc
+    elif extension == 'json':
+        try:
+            json.loads(source)
+        except json.JSONDecodeError as exc:
+            raise LongformError(f'Invalid JSON at line {exc.lineno}: {exc.msg}') from exc
+    elif extension in {'js','tsx','html','css','sql','yaml','md','txt'}:
+        # No execution or misleading claim that the output compiles.
+        if '\x00' in source:
+            raise LongformError('Generated source contains a null byte.')
+
+
+
+def generate_report_sections(prompt, provider, *, max_sections=16):
+    """
+    Generate long Word/PDF reports in bounded sections.
+
+    An oversized section is retried independently.
+    Previously generated sections are preserved in memory.
+    No generated content is executed.
+    """
+    sys = (
+        "You write precise, well-structured technical reports. "
+        "For outlines, return valid JSON only. "
+        "Never invent measurements, citations, or external facts."
+    )
+
+    report_progress("Planning report outline", 12)
+    raw = _ask(
+        "Create an outline for the requested report. "
+        'Return one JSON object with "title" and "sections". '
+        '"sections" must be an array of descriptive headings. '
+        f"Use 3 to {max_sections} sections, depending on scope. "
+        "Do not include section bodies or Markdown fences.\n"
+        "REQUEST:\n" + prompt,
+        provider,
+        system=sys,
+        limit=8000,
+    )
+
+    try:
+        plan = json.loads(_remove_fences(raw))
+        title = str(plan["title"]).strip()[:130]
+        names = plan["sections"]
+
+        if (
+            not title
+            or not isinstance(names, list)
+            or not 1 <= len(names) <= max_sections
+        ):
+            raise ValueError("Invalid outline")
+
+        names = [str(name).strip()[:150] for name in names]
+
+        if any(not name for name in names):
+            raise ValueError("Empty section heading")
+
+    except (ValueError, KeyError, TypeError) as exc:
+        raise LongformError(
+            "Model returned an invalid report outline."
+        ) from exc
+
+    report_progress(f"Outline ready — {len(names)} sections", 18)
+    sections = []
+
+    for index, heading in enumerate(names, start=1):
+        report_progress(f"Generating section {index} of {len(names)}: {str(heading)[:75]}", 18 + ((index-1) * 67 // len(names)))
+        last_error = None
+        body = None
+
+        # Retry the current section, not the whole report.
+        for attempt in range(3):
+            word_target = [400, 280, 180][attempt]
+
+            section_prompt = (
+                f"Write section {index} of {len(names)}.\n"
+                f"SECTION TITLE: {heading}\n"
+                f"TARGET LENGTH: Approximately {word_target} words.\n"
+                "Use substantive, relevant paragraphs. "
+                "Be concise, avoid repetition, and do not exceed "
+                "the target by more than 20%. "
+                "Do not write other sections. "
+                "Do not include Markdown fences. "
+                "Never fabricate measurements, test results "
+                "or source citations.\n"
+                f"REPORT OUTLINE: {json.dumps(names)}\n"
+                f"ORIGINAL REQUEST:\n{prompt}"
+            )
+
+            try:
+                candidate = _ask(
+                    section_prompt,
+                    provider,
+                    system=(
+                        "You are a technical report author. "
+                        "Write only the requested section body."
+                    ),
+                    limit=9000,
+                )
+
+                if len(candidate.strip()) < 100:
+                    raise LongformError(
+                        "Generated section was too short."
+                    )
+
+                body = candidate.strip()
+                break
+
+            except LongformError as exc:
+                last_error = exc
+
+        if body is None:
+            raise LongformError(
+                f"Section {index}/{len(names)} "
+                f"({heading}) failed after 3 attempts: "
+                f"{last_error}"
+            )
+
+        sections.append({
+            "heading": heading,
+            "body": body,
+        })
+        report_progress(f"Completed section {index} of {len(names)}", 18 + (index * 67 // len(names)))
+
+    report_progress("All sections generated — assembling document", 87)
+    return title, sections

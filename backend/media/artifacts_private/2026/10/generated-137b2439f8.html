@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCTV Monitoring Status</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-muted: #eef3f8;
+      --text: #172033;
+      --muted: #68758a;
+      --border: #dce4ee;
+      --primary: #2357d9;
+      --primary-dark: #173e9f;
+      --online: #16845b;
+      --online-bg: #e7f7ef;
+      --offline: #b33a42;
+      --offline-bg: #fdebed;
+      --shadow: 0 12px 30px rgba(27, 49, 83, 0.08);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .site-header {
+      color: #fff;
+      background: #15233d;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .header-inner,
+    .container {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 76px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      color: #fff;
+      background: var(--primary);
+      border-radius: 12px;
+      font-size: 1.25rem;
+      font-weight: 800;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 1.22rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      color: #b8c5db;
+      font-size: 0.82rem;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #dce7f8;
+      font-size: 0.9rem;
+    }
+
+    .pulse {
+      width: 9px;
+      height: 9px;
+      background: #43d58d;
+      border-radius: 50%;
+      box-shadow: 0 0 0 5px rgba(67, 213, 141, 0.15);
+    }
+
+    main {
+      padding: 42px 0 64px;
+    }
+
+    .page-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+
+    .page-heading h2 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3vw, 2.5rem);
+      letter-spacing: -0.04em;
+    }
+
+    .page-heading p {
+      margin: 7px 0 0;
+      color: var(--muted);
+    }
+
+    .last-updated {
+      color: var(--muted);
+      font-size: 0.88rem;
+      white-space: nowrap;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .metric-card {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .metric-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
+
+    .metric-value {
+      display: block;
+      font-size: 1.9rem;
+      font-weight: 750;
+      letter-spacing: -0.04em;
+    }
+
+    .metric-detail {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .search-group {
+      flex: 1;
+      max-width: 470px;
+    }
+
+    .search-group label,
+    .filter-group label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--text);
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .search-wrap {
+      position: relative;
+    }
+
+    .search-wrap span {
+      position: absolute;
+      top: 50%;
+      left: 14px;
+      color: var(--muted);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 13px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+    }
+
+    input {
+      padding-left: 40px;
+    }
+
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      border-color: var(--primary);
+      outline: 3px solid rgba(35, 87, 217, 0.2);
+      outline-offset: 2px;
+    }
+
+    .filter-group {
+      width: 180px;
+    }
+
+    .camera-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .camera-card {
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .camera-preview {
+      position: relative;
+      display: flex;
+      min-height: 184px;
+      align-items: center;
+      justify-content: center;
+      color: #a9b9d1;
+      background:
+        linear-gradient(135deg, rgba(35, 87, 217, 0.16), transparent 45%),
+        linear-gradient(315deg, rgba(19, 35, 61, 0.9), rgba(40, 65, 103, 0.8)),
+        #243b61;
+    }
+
+    .camera-preview.offline {
+      background:
+        linear-gradient(135deg, rgba(179, 58, 66, 0.18), transparent 45%),
+        #293449;
+    }
+
+    .camera-icon {
+      display: grid;
+      width: 68px;
+      height: 48px;
+      place-items: center;
+      color: #d9e6fb;
+      border: 2px solid currentColor;
+      border-radius: 10px;
+      font-size: 1.45rem;
+      opacity: 0.85;
+    }
+
+    .camera-icon::after {
+      width: 12px;
+      height: 12px;
+      margin-left: 52px;
+      content: "";
+      position: absolute;
+      border: 2px solid currentColor;
+      border-left: 0;
+      border-radius: 0 7px 7px 0;
+    }
+
+    .preview-label {
+      position: absolute;
+      top: 13px;
+      left: 14px;
+      color: #d5e0f0;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .badge {
+      position: absolute;
+      top: 13px;
+      right: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 750;
+    }
+
+    .badge::before {
+      width: 7px;
+      height: 7px;
+      content: "";
+      background: currentColor;
+      border-radius: 50%;
+    }
+
+    .badge.online {
+      color: var(--online);
+      background: var(--online-bg);
+    }
+
+    .badge.offline {
+      color: var(--offline);
+      background: var(--offline-bg);
+    }
+
+    .camera-content {
+      padding: 19px 20px 18px;
+    }
+
+    .camera-title-row {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .camera-title-row h3 {
+      margin: 0;
+      font-size: 1.08rem;
+    }
+
+    .camera-id {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .camera-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 19px 0 0;
+      padding-top: 15px;
+      border-top: 1px solid var(--border);
+    }
+
+    .camera-details dt {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+
+    .camera-details dd {
+      margin: 2px 0 0;
+      font-size: 0.87rem;
+      font-weight: 650;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .button {
+      min-height: 38px;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .button-primary {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .button-primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .button-secondary {
+      color: var(--text);
+      background: var(--surface);
+    }
+
+    .button-secondary:hover {
+      background: var(--surface-muted);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    footer {
+      padding: 24px 0;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      text-align: center;
+    }
+
+    @media (max-width: 800px) {
+      .metrics {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .camera-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .header-inner,
+      .container {
+        width: min(100% - 28px, 1180px);
+      }
+
+      .header-inner,
+      .page-heading,
+      .toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .header-inner {
+        justify-content: center;
+        padding: 16px 0;
+      }
+
+      .header-status {
+        align-self: flex-start;
+      }
+
+      main {
+        padding-top: 30px;
+      }
+
+      .last-updated {
+        white-space: normal;
+      }
+
+      .metrics {
+        gap: 12px;
+      }
+
+      .metric-card {
+        padding: 15px;
+      }
+
+      .metric-value {
+        font-size: 1.55rem;
+      }
+
+      .filter-group,
+      .search-group {
+        width: 100%;
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">◉</div>
+        <div>
+          <h1>SecureView Monitor</h1>
+          <p>Security operations dashboard</p>
+        </div>
+      </div>
+      <div class="header-status" aria-label="System status">
+        <span class="pulse" aria-hidden="true"></span>
+        All systems operational
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <section class="page-heading" aria-labelledby="page-title">
+        <div>
+          <h2 id="page-title">Camera status</h2>
+          <p>Monitor connectivity and availability across your camera network.</p>
+        </div>
+        <div class="last-updated">Last updated: <time datetime="2026-10-28T14:32:00">October 28, 2026 at 2:32 PM</time></div>
+      </section>
+
+      <section class="metrics" aria-label="Monitoring summary">
+        <article class="metric-card">
+          <span class="metric-label">Total cameras</span>
+          <strong class="metric-value">24</strong>
+          <span class="metric-detail">Across 6 locations</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Online</span>
+          <strong class="metric-value">21</strong>
+          <span class="metric-detail">87.5% availability</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Offline</span>
+          <strong class="metric-value">3</strong>
+          <span class="metric-detail">Requires attention</span>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">Recording</span>
+          <strong class="metric-value">20</strong>
+          <span class="metric-detail">Active recording streams</span>
+        </article>
+      </section>
+
+      <section aria-labelledby="camera-list-title">
+        <div class="toolbar">
+          <div class="search-group">
+            <label for="camera-search">Search cameras</label>
+            <div class="search-wrap">
+              <span aria-hidden="true">⌕</span>
+              <input id="camera-search" type="search" placeholder="Search by name or location" autocomplete="off">
+            </div>
+          </div>
+          <div class="filter-group">
+            <label for="status-filter">Filter by status</label>
+            <select id="status-filter">
+              <option value="all">All cameras</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+            </select>
+          </div>
+        </div>
+
+        <h2 id="camera-list-title" class="sr-only">Camera list</h2>
+        <div class="camera-grid">
+          <article class="camera-card" data-status="online">
+            <div class="camera-preview">
+              <span class="preview-label">Live preview</span>
+              <span class="badge online">Online</span>
+              <div class="camera-icon" aria-hidden="true">●</div>
+            </div>
+            <div class="camera-content">
+              <div class="camera-title-row">
+                <div>
+                  <h3>North Entrance</h3>
+                  <p class="camera-id">CAM-001 · Main Building</p>
+                </div>
+              </div>
+              <dl class="camera-details">
+                <div><dt>Resolution</dt><dd>1080p HD</dd></div>
+                <div><dt>Last check</dt><dd>Just now</dd></div>
+              </dl>
+              <div class="card-actions">
+                <button class="button button-primary" type="button">View camera</button>
+                <button class="button button-secondary" type="button">Settings</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="camera-card" data-status="online">
+            <div class="camera-preview">
+              <span class="preview-label">Live preview</span>
+              <span class="badge online">Online</span>
+              <div class="camera-icon" aria-hidden="true">●</div>
+            </div>
+            <div class="camera-content">
+              <div class="camera-title-row">
+                <div>
+                  <h3>Parking Lot A</h3>
+                  <p class="camera-id">CAM-002 · Exterior</p>
+                </div>
+              </div>
+              <dl class="camera-details">
+                <div><dt>Resolution</dt><dd>4K UHD</dd></div>
+                <div><dt>Last check</dt><dd>1 min ago</dd></div>
+              </dl>
+              <div class="card-actions">
+                <button class="button button-primary" type="button">View camera</button>
+                <button class="button button-secondary" type="button">Settings</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="camera-card" data-status="offline">
+            <div class="camera-preview offline">
+              <span class="preview-label">Signal unavailable</span>
+              <span class="badge offline">Offline</span>
+              <div class="camera-icon" aria-hidden="true">×</div>
+            </div>
+            <div class="camera-content">
+              <div class="camera-title-row">
+                <div>
+                  <h3>Warehouse West</h3>
+                  <p class="camera-id">CAM-003 · Warehouse</p>
+                </div>
+              </div>
+              <dl class="camera-details">
+                <div><dt>Resolution</dt><dd>1080p HD</dd></div>
+                <div><dt>Last check</dt><dd>18 min ago</dd></div>
+              </dl>
+              <div class="card-actions">
+                <button class="button button-primary" type="button">Troubleshoot</button>
+                <button class="button button-secondary" type="button">Settings</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="camera-card" data-status="online">
+            <div class="camera-preview">
+              <span class="preview-label">Live preview</span>
+              <span class="badge online">Online</span>
+              <div class="camera-icon" aria-hidden="true">●</div>
+            </div>
+            <div class="camera-content">
+              <div class="camera-title-row">
+                <div>
+                  <h3>Reception Desk</h3>
+                  <p class="camera-id">CAM-004 · Main Building</p>
+                </div>
+              </div>
+              <dl class="camera-details">
+                <div><dt>Resolution</dt><dd>1080p HD</dd></div>
+                <div><dt>Last check</dt><dd>2 min ago</dd></div>
+              </dl>
+              <div class="card-actions">
+                <button class="button button-primary" type="button">View camera</button>
+                <button class="button button-secondary" type="button">Settings</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">SecureView Monitor · CCTV infrastructure status dashboard</div>
+  </footer>
+
+  <style>
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</body>
+</html>

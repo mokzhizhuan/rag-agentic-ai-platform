@@ -1,0 +1,6 @@
+# Append to existing backend/artifacts/urls.py; keep all existing routes:
+from . import job_views
+urlpatterns += [
+    path('jobs/', job_views.generation_jobs),
+    path('jobs/<int:pk>/', job_views.generation_job_detail),
+]
