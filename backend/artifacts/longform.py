@@ -46,33 +46,99 @@ def _extract_piece(raw):
     raise LongformError('Model did not provide a completion marker. The incomplete file was not saved.')
 
 
-def _read_json_plan(prompt, provider, extension, max_units=16):
-    raw = _ask(
-        f"Plan ONE complete .{extension} source file for this request. "
-        "Return only JSON with keys 'imports' (brief description of import/header needs), "
-        "'units' (array of objects containing 'name' and 'responsibility'). "
-        f"Use 3 to {max_units} cohesive units. If Python and the user requests N classes, "
-        "give each class a separate unit; include a final tests unit if requested. "
-        "No code yet. Never claim code execution.\nREQUEST:\n" + prompt,
-        provider,
-        system='You plan code files. Reply with a valid JSON object, without code fences.',
-        limit=12000,
-    )
-    try:
-        plan = json.loads(_remove_fences(raw))
-        units = plan['units']
+def _parse_code_plan(raw, max_units):
+    """Parse a model-supplied plan without accepting unstructured prose or code."""
+    candidate = _remove_fences(raw.strip())
+    choices = [candidate]
+    # Extract exactly one balanced-looking JSON object from explanatory wrappers.
+    # JSONDecoder still validates the full object and rejects invalid/truncated JSON.
+    begin = candidate.find('{')
+    if begin >= 0:
+        try:
+            parsed, end_offset = json.JSONDecoder().raw_decode(candidate[begin:])
+            choices.append(candidate[begin:begin + end_offset])
+        except json.JSONDecodeError:
+            pass
+    for payload in choices:
+        try:
+            plan = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(plan, dict):
+            continue
+        units = plan.get('units')
         if not isinstance(units, list) or not 1 <= len(units) <= max_units:
-            raise ValueError('invalid units')
+            continue
         normalized = []
         for unit in units:
-            name = str(unit['name']).strip()[:100]
-            purpose = str(unit['responsibility']).strip()[:500]
+            if not isinstance(unit, dict):
+                break
+            name = unit.get('name')
+            responsibility = unit.get('responsibility')
+            if not isinstance(name, str) or not isinstance(responsibility, str):
+                break
+            name = name.strip()[:100]
+            purpose = responsibility.strip()[:500]
             if not name or not purpose:
-                raise ValueError('empty unit')
+                break
+            # For Python, unit names may be function/class names or descriptive
+            # test-unit labels. Keep all names short and safe for prompt usage.
+            if '\n' in name or '\r' in name:
+                break
             normalized.append((name, purpose))
-        return str(plan.get('imports', '')).strip()[:1200], normalized
-    except (KeyError, TypeError, ValueError) as exc:
-        raise LongformError('The AI did not return a usable code plan. No file was saved.') from exc
+        if len(normalized) != len(units):
+            continue
+        imports = plan.get('imports', '')
+        if not isinstance(imports, str):
+            imports = ''
+        return imports.strip()[:1200], normalized
+    raise ValueError('Missing or malformed JSON plan with valid units')
+
+
+def _read_json_plan(prompt, provider, extension, max_units=16):
+    """Plan code with bounded retries for smaller local models.
+
+    Do not fabricate a hardcoded plan: every accepted plan still comes from the
+    chosen AI model and must conform to the same schema.
+    """
+    basic = (
+        f'Plan ONE .{extension} file for the following request. '
+        'Return ONLY compact valid JSON, with keys "imports" (string) and '
+        '"units" (array of objects with "name" and "responsibility" strings). '
+        f'Use 2 to {max_units} units; group related small functions if appropriate. '
+        'Include requested tests as a final test unit. '
+        'Use short names and descriptions. No code or Markdown.\nREQUEST:\n' + prompt
+    )
+    retries = [
+        basic,
+        ('Your previous plan was not valid JSON or was cut off. Return a SMALLER, '
+         'complete JSON object with exactly the keys "imports" and "units". '
+         'Each unit has "name" and "responsibility" string fields. '
+         'Use 2-4 compact units while preserving the core requirements and tests. '
+         'Do not include prose or fences.\nREQUEST:\n' + prompt),
+        ('Return ONLY a compact JSON source-file plan. All JSON punctuation must '
+         'be complete. Use 1-3 well-scoped units; include tests if requested. '
+         'Keys: "imports", "units"; unit keys: "name", "responsibility". '
+         'Do not output code.\nREQUEST:\n' + prompt),
+    ]
+    last_issue = 'unknown error'
+    for attempt, message in enumerate(retries):
+        try:
+            raw = _ask(
+                message, provider,
+                system='You plan code files. Reply with one complete valid JSON object only.',
+                limit=12000,
+            )
+            return _parse_code_plan(raw, max_units)
+        except (LongformError, ValueError, KeyError, TypeError) as exc:
+            last_issue = type(exc).__name__
+            report_progress(f'Code plan retry {attempt + 1} of {len(retries)}', 10)
+    raise LongformError(
+        'The AI did not return a usable code plan after 3 attempts. '
+        'For local Ollama models, verify OLLAMA_MAX_TOKENS is at least 2048 '
+        f'in the generation worker environment (last error: {last_issue}). '
+        'No file was saved.'
+    )
 
 
 def _strip_code(raw):
@@ -310,7 +376,7 @@ def validate_source(source, extension):
 
 
 
-def generate_report_sections(prompt, provider, *, max_sections=16):
+def generate_report_sections(prompt, provider, *, max_sections=16, require_table=False):
     """
     Generate long Word/PDF reports in bounded sections.
 
@@ -420,6 +486,13 @@ def generate_report_sections(prompt, provider, *, max_sections=16):
             "body": body,
         })
         report_progress(f"Completed section {index} of {len(names)}", 18 + (index * 67 // len(names)))
+
+    if require_table:
+        from .pdf_table_requirements import ensure_pdf_tables
+        try:
+            sections = ensure_pdf_tables(prompt, sections, provider, ask=_ask)
+        except ValueError as exc:
+            raise LongformError(str(exc)) from exc
 
     report_progress("All sections generated — assembling document", 87)
     return title, sections

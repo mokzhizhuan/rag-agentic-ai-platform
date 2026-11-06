@@ -1,0 +1,6 @@
+﻿Equipment ID,Equipment Name,Location,Status,Last Inspection Date
+EQ-001,Hydraulic Press,Manufacturing Area A,Operational,2026-01-15
+EQ-002,Forklift FL-12,Warehouse 1,Operational,2026-02-03
+EQ-003,Air Compressor AC-07,Maintenance Room,Under Maintenance,2026-01-28
+EQ-004,CNC Milling Machine CM-04,Manufacturing Area B,Operational,2026-02-10
+EQ-005,Emergency Generator EG-02,Utility Building,Operational,2026-02-17

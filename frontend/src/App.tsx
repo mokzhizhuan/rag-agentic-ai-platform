@@ -51,6 +51,7 @@ export default function App({keycloak}:{keycloak:Keycloak}) {
   const [previewLoading,setPreviewLoading]=useState(false);
   const [previewNote,setPreviewNote]=useState('');
   const [file,setFile]=useState<File|null>(null);
+  const [uploadFeedback,setUploadFeedback]=useState<{kind:'success'|'error'|'info';message:string}|null>(null);
   const [chatFiles,setChatFiles]=useState<File[]>([]);
   const [memories,setMemories]=useState<Memory[]>([]);
   const [memoryMode,setMemoryMode]=useState<'manual'|'auto'>('manual');
@@ -361,11 +362,30 @@ export default function App({keycloak}:{keycloak:Keycloak}) {
      }catch(e){setError(String(e));setQuestion(text);}
      finally{setBusy(false);setStreamStatus('');if(!completed){setStreamText('');setStreamSources([]);setPendingQuestion('');}}
    }
-  async function upload(){if(!file||busy)return;setBusy(true);setError('');setNotice('Indexing document...');
-    try{const form=new FormData();form.append('file',file);const result=await api('/api/knowledge/documents/',{method:'POST',body:form});
-      setNotice(result.status==='ready'?`Indexed ${result.chunk_count} chunks`:`Indexing failed: ${result.error}`);setFile(null);
-      const input=document.getElementById('doc-file') as HTMLInputElement|null;if(input)input.value='';await refresh();
-    }catch(e){setError(String(e));setNotice('');}finally{setBusy(false);}}
+  async function upload(){
+    if(!file||busy)return;
+    setBusy(true);setError('');setNotice('');
+    setUploadFeedback({kind:'info',message:`Uploading and indexing ${file.name}...`});
+    try{
+      const form=new FormData();form.append('file',file);
+      const result=await api('/api/knowledge/documents/',{method:'POST',body:form});
+      if(result.status==='ready'){
+        setUploadFeedback({kind:'success',message:`${result.filename || file.name} uploaded and indexed successfully (${result.chunk_count} chunk${result.chunk_count===1?'':'s'}).`});
+      }else{
+        setUploadFeedback({kind:'error',message:`Indexing failed: ${result.error || 'Check the backend logs for details.'}`});
+      }
+      setFile(null);
+      const input=document.getElementById('doc-file') as HTMLInputElement|null;
+      if(input)input.value='';
+      await refresh();
+    }catch(e){
+      const raw=e instanceof Error?e.message:String(e);
+      const statusMatch=raw.match(/(?:^|\s)(409|400|413):\s*(.*)/);
+      const detail=statusMatch?statusMatch[2]:(raw.replace(/^Error:\s*/,''));
+      const isDuplicate=statusMatch?.[1]==='409';
+      setUploadFeedback({kind:'error',message:isDuplicate?`Duplicate document: ${detail || 'This document already exists in your Knowledge Base.'}`:detail});
+    }finally{setBusy(false);}
+  }
   async function removeDoc(id:number){if(!window.confirm('Delete this document and its chunks?'))return;
     try{await api(`/api/knowledge/documents/${id}/`,{method:'DELETE'});await refresh();setResults([]);}catch(e){setError(String(e));}}
   async function removeChat(id:number){if(!window.confirm('Delete this conversation?'))return;
@@ -535,7 +555,10 @@ export default function App({keycloak}:{keycloak:Keycloak}) {
         <article className="diagnostics-card"><h3>Current workspace settings</h3><ul><li>Selected AI provider: <strong>{provider==='openai'?'OpenAI':'Ollama'}</strong> (selection only; connectivity not tested)</li><li>Chat routing mode: <strong>{mode}</strong> (selection only)</li><li>Knowledge documents indexed/ready: <strong>{docs.filter(d=>d.status==='ready').length}</strong> of {docs.length}</li><li>Available ZIP artifacts: <strong>{artifacts.filter(a=>a.format==='zip'||a.filename.toLowerCase().endsWith('.zip')).length}</strong></li><li>Most recent job: <strong>{generationJobs.length?`#${generationJobs[0].id} (${generationJobs[0].status})`:'None reported'}</strong></li></ul></article>
       </div>
       <div className="diagnostics-note"><strong>Scope of diagnostics:</strong> Counts describe records returned for the signed-in account; the jobs API may return a limited history. This is not a real-time health monitor. Keycloak session health, PostgreSQL availability, Ollama connectivity, response latency, model tokens and pgvector similarity are not measured here. No simulated metrics are shown.</div>
-    </section>:<section className="knowledge-studio"><h2>Knowledge Base</h2><article><h3>Upload knowledge document</h3><p className="muted">Text-based PDF, DOCX, TXT or Markdown • max 10 MB</p><div className="action"><input id="doc-file" type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>setFile(e.target.files?.[0]??null)}/><button disabled={!file||busy} onClick={()=>void upload()}>{busy?'Indexing...':'Upload & index'}</button></div></article>
+    </section>:<section className="knowledge-studio"><h2>Knowledge Base</h2><article><h3>Upload knowledge document</h3><p className="muted">Text-based PDF, DOCX, TXT or Markdown • max 10 MB</p><div className="action"><input id="doc-file" type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{setFile(e.target.files?.[0]??null);setUploadFeedback(null);}}/><button disabled={!file||busy} onClick={()=>void upload()}>{busy?'Indexing...':'Upload & index'}</button></div>
+      {uploadFeedback&&<div role={uploadFeedback.kind==='error'?'alert':'status'} aria-live="polite" style={{marginTop:12,padding:'10px 12px',borderRadius:7,border:`1px solid ${uploadFeedback.kind==='error'?'#9f3648':uploadFeedback.kind==='success'?'#257f68':'#475569'}`,background:uploadFeedback.kind==='error'?'#321c2a':uploadFeedback.kind==='success'?'#12352f':'#1e293b',color:uploadFeedback.kind==='error'?'#fecdd3':uploadFeedback.kind==='success'?'#bbf7d0':'#e2e8f0',fontSize:13,lineHeight:1.5,overflowWrap:'anywhere'}}>
+        <strong>{uploadFeedback.kind==='error'?'Upload not completed':uploadFeedback.kind==='success'?'Upload successful':'Processing'}</strong> — {uploadFeedback.message}
+      </div>}</article>
       <article><h3>My documents ({docs.length})</h3>{docs.map(d=><div className="doc" key={d.id}><div><strong>{d.filename}</strong><p className="muted">{d.status} · {d.chunk_count} chunks · {d.embedding_model} · {(d.byte_size/1024).toFixed(1)} KB</p>{d.error&&<p className="error">{d.error}</p>}</div><button onClick={()=>void removeDoc(d.id)}>Delete</button></div>)}{docs.length===0&&<p className="muted">No indexed documents yet</p>}</article>
       <article><h3>Test semantic retrieval</h3><div className="action"><input className="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search document content"/><button disabled={busy||query.trim().length<2} onClick={()=>void search()}>Search</button></div>{results.map((m,i)=><div className="match" key={i}><strong>{m.filename}{m.page?` · p.${m.page}`:''}</strong><small>Similarity: {m.similarity}</small><p>{m.text}</p></div>)}</article></section>}
     <p className="muted">Local development · Keycloak-secured · RAG sources from your uploaded documents</p>

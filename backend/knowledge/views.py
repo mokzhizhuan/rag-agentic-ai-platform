@@ -19,6 +19,77 @@ def serialize(d):
             'error':d.error,'chunk_count':d.chunk_count,'embedding_provider':d.embedding_provider,
             'embedding_model':d.embedding_model,'created_at':d.created_at.isoformat()}
 
+
+# Upload preflight checks run BEFORE a document row or stored file is created.
+# Files from different users are intentionally not compared.
+def _validate_uploaded_binary(filename, binary):
+    from io import BytesIO
+    from zipfile import ZipFile, BadZipFile
+
+    extension = Path(filename).suffix.lower()
+    if not binary:
+        return 'The uploaded file is empty.'
+    if extension == '.pdf':
+        if not binary.startswith(b'%PDF-'):
+            return 'Invalid PDF: the file is not a PDF document.'
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(BytesIO(binary), strict=False)
+            if not reader.pages:
+                return 'Invalid PDF: no pages were found.'
+            # Check that the PDF page tree is readable before storing the file.
+            for page in reader.pages:
+                _ = page.mediabox
+        except Exception:
+            return 'Invalid or damaged PDF document.'
+    elif extension == '.docx':
+        if not binary.startswith(b'PK\x03\x04'):
+            return 'Invalid DOCX: the file is not a Word document.'
+        try:
+            with ZipFile(BytesIO(binary)) as archive:
+                names = set(archive.namelist())
+                if '[Content_Types].xml' not in names or 'word/document.xml' not in names:
+                    return 'Invalid DOCX: required Word document parts are missing.'
+                # Avoid feeding obviously malformed or extremely inflated archives to
+                # python-docx. Valid Word files may include embedded media.
+                if len(names) > 2000 or sum(x.file_size for x in archive.infolist()) > 100 * 1024 * 1024:
+                    return 'Invalid DOCX: archive exceeds document safety limits.'
+                if archive.testzip() is not None:
+                    return 'Invalid DOCX: archive contains corrupt data.'
+            from docx import Document
+            Document(BytesIO(binary))
+        except Exception:
+            return 'Invalid or damaged DOCX document.'
+    return None
+
+
+def _matching_document(owner_sub, binary):
+    """Find an existing identical, readable user document (no schema migration).
+
+    Compare SHA-256 digests, not names. Read existing storage in bounded chunks;
+    avoid exposing any other user's documents. The input is capped at 10 MB.
+    """
+    import hashlib
+    digest = hashlib.sha256(binary).digest()
+    candidates = KnowledgeDocument.objects.filter(
+        owner_sub=owner_sub, byte_size=len(binary), status='ready'
+    ).only('id', 'file', 'filename').order_by('id')
+    for existing in candidates.iterator():
+        if not existing.file:
+            continue
+        try:
+            stored_hash = hashlib.sha256()
+            with existing.file.open('rb') as stored:
+                for chunk in iter(lambda: stored.read(65536), b''):
+                    stored_hash.update(chunk)
+            if stored_hash.digest() == digest:
+                return existing
+        except (OSError, ValueError):
+            # An unavailable old storage object cannot be compared; don't prevent
+            # the new upload simply because an old file has gone missing.
+            log.warning('Could not check existing document %s for duplicate upload', existing.pk)
+    return None
+
 @api_view(['GET','POST'])
 @permission_classes([IsAuthenticated])
 def documents(request):
@@ -35,6 +106,16 @@ def documents(request):
         return Response({'detail':'10 MB upload limit'},status=400)
     binary=upload.read(MAX_UPLOAD+1)
     if len(binary)>MAX_UPLOAD:return Response({'detail':'10 MB upload limit'},status=400)
+    invalid = _validate_uploaded_binary(filename, binary)
+    if invalid:
+        return Response({'detail': invalid}, status=status.HTTP_400_BAD_REQUEST)
+    existing = _matching_document(sub, binary)
+    if existing is not None:
+        return Response({
+            'detail': 'This document already exists in your Knowledge Base.',
+            'existing_document_id': existing.pk,
+            'existing_filename': existing.filename,
+        }, status=status.HTTP_409_CONFLICT)
     doc=KnowledgeDocument(owner_sub=sub, filename=filename, byte_size=len(binary))
     from django.core.files.base import ContentFile
     doc.file.save(filename,ContentFile(binary),save=True)

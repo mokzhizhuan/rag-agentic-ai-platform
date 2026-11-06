@@ -1,0 +1,7 @@
+Project name: Project Aurora-927
+Authentication system: Keycloak
+Backend framework: Django
+Frontend framework: React
+Internal project code: PX-7319
+Special maintenance day: Thursday
+Project coordinator: Sample Coordinator Delta

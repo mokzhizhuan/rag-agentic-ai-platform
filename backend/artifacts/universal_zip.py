@@ -25,6 +25,45 @@ ALLOWED_EXT = {'.py','.js','.jsx','.ts','.tsx','.html','.htm','.css','.scss','.j
 ALLOWED_BASENAMES = {'Dockerfile','Makefile','LICENSE','README','requirements.txt','Procfile','.env.example','.gitignore','.dockerignore'}
 SECRET_PAT = re.compile(r'(?i)(?:sk-[A-Za-z0-9_-]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|AKIA[0-9A-Z]{16})')
 
+# Cross-package checks are intentionally narrow: an uncertain version is left
+# for npm audit/build testing instead of incorrectly blocking a valid project.
+DEPENDENCY_POLICY = (
+    'When generating package.json, choose mutually compatible, maintained versions '
+    'of the framework, build tool, compiler, plugins, and type packages. '
+    'Check plugin peer dependency major ranges against the chosen build tool; '
+    'do not pair Vite 8 with @vitejs/plugin-react 4 or 5. '
+    'When using Vite 8, choose a compatible @vitejs/plugin-react 6 release. '
+    'Do not fabricate live security-audit results or claim to have compiled the project. '
+    'Document that npm install, npm run build and npm audit must be run by the user. '
+    'Do not suggest npm audit fix --force as the default remediation. '
+)
+
+
+def _simple_major(spec: object) -> int | None:
+    """Recognize only single explicit major ranges, not npm unions/complex ranges."""
+    if not isinstance(spec, str):
+        return None
+    match = re.fullmatch(r'\s*(?:\^|~|=)?\s*(\d+)(?:\.\d+){0,2}\s*', spec)
+    return int(match.group(1)) if match else None
+
+
+def _check_frontend_peer_versions(path: str, manifest: dict) -> None:
+    if PurePosixPath(path).name != 'package.json' or not isinstance(manifest, dict):
+        return
+    deps = {}
+    for kind in ('dependencies', 'devDependencies'):
+        values = manifest.get(kind, {})
+        if isinstance(values, dict):
+            deps.update(values)
+    vite = _simple_major(deps.get('vite'))
+    react_plugin = _simple_major(deps.get('@vitejs/plugin-react'))
+    if vite is not None and vite >= 8 and react_plugin in (4, 5):
+        raise UniversalZipError(
+            f'{path}: incompatible peer versions: Vite {vite} with '
+            f'@vitejs/plugin-react {react_plugin}. Select a compatible '
+            'React plugin and regenerate package.json.'
+        )
+
 
 def _ask(query: str, provider: str, system: str, limit: int) -> str:
     chunks, total = [], 0
@@ -139,8 +178,11 @@ def _sanity_content(path: str, content: str):
         try: ast.parse(content)
         except SyntaxError as e: raise UniversalZipError(f'{path}: Python syntax line {e.lineno}: {e.msg}') from e
     if ext=='.json':
-        try: json.loads(content)
-        except ValueError as e: raise UniversalZipError(f'{path}: invalid JSON: {str(e)[:100]}') from e
+        try:
+            parsed_json = json.loads(content)
+        except ValueError as e:
+            raise UniversalZipError(f'{path}: invalid JSON: {str(e)[:100]}') from e
+        _check_frontend_peer_versions(path, parsed_json)
     if ext in {'.yaml','.yml'}:
         try:
             from .structured_quality import validate_yaml
@@ -158,12 +200,17 @@ def _sanity_content(path: str, content: str):
             validate_sql(content)
         except ImportError:
             raise UniversalZipError('Stage 3 structured_quality.py required for SQL validation')
-    if ext in {'.js','.tsx'}:
+    if ext in {'.js', '.jsx', '.ts', '.tsx'}:
         try:
-            from .code_quality import _parse_source
+            from .code_quality import _parse_source, CodeQualityError
+        except ImportError as exc:
+            raise UniversalZipError('Frontend Tree-sitter validator is not installed') from exc
+        try:
             _parse_source(content, ext)
-        except ImportError:
-            raise UniversalZipError('Stage 1 code_quality.py required for JS/TSX validation')
+        except CodeQualityError as exc:
+            # Preserve the exact error location for the existing per-file
+            # repair loop in generate_universal_zip().
+            raise UniversalZipError(str(exc)) from exc
     if ext in {'.html','.css'}:
         try:
             from .markup_quality import validate_html, validate_css
@@ -244,11 +291,11 @@ def generate_universal_zip(prompt: str, provider: str, progress: Callable[[str,i
     def status(message, percent):
         if progress: progress(message,percent)
     status('Planning multi-file project',5)
-    schema='''Return ONLY JSON: {"name":"project name","contracts":["shared API/interface/config fact"],"files":[{"path":"relative/file.ext","purpose":"precise purpose","depends_on":["other/file.ext"]}]}. Plan 2-35 text/source/config files, with explicit cross-file contracts (API routes, JSON fields, ports, env names, dependencies), Use depends_on only for files that must be generated first; runtime imports/assets may be cyclic and will be validated after generation. Choose any technology requested, not just React. Include README.md and .env.example where appropriate. Use only relative POSIX paths, never secrets, binaries or generated lockfiles. Keep total project focused and feasible; each file should be reasonably short. Never claim tests run.'''
+    schema='''Return ONLY JSON: {"name":"project name","contracts":["shared API/interface/config fact"],"files":[{"path":"relative/file.ext","purpose":"precise purpose","depends_on":["other/file.ext"]}]}. Plan 2-35 text/source/config files, with explicit cross-file contracts (API routes, JSON fields, ports, env names, dependencies), Use depends_on only for files that must be generated first; runtime imports/assets may be cyclic and will be validated after generation. Choose any technology requested, not just React. Include README.md and .env.example where appropriate. Use only relative POSIX paths, never secrets, binaries or generated lockfiles. Keep total project focused and feasible; each file should be reasonably short. Include a compatible dependency version strategy in the shared contracts for build-tool projects. Never claim tests run.'''
     plan=None
     for attempt in range(3):
         try:
-            raw=_ask(f'USER REQUEST:\n{prompt}\n\nPROJECT PLAN RULES:\n{schema}',provider,'You design compact, internally consistent project structures. Output valid JSON only.',MAX_PLAN_CHARS)
+            raw=_ask(f'USER REQUEST:\n{prompt}\n\nPROJECT PLAN RULES:\n{schema}\n\nDEPENDENCY POLICY:\n{DEPENDENCY_POLICY}',provider,'You design compact, internally consistent project structures. Output valid JSON only.',MAX_PLAN_CHARS)
             plan=validate_plan(_json(raw)); break
         except UniversalZipError:
             if attempt==2: raise
@@ -265,6 +312,7 @@ def generate_universal_zip(prompt: str, provider: str, progress: Callable[[str,i
                    'Write ONE complete file only. Follow project contracts, imports, filenames, API fields, ports and env vars exactly. '
                    'No markdown fences, explanations, fake secrets, incomplete TODO code or extra files. '
                    'Use placeholder values for unavailable real information.\n'
+                   +(f'DEPENDENCY POLICY: {DEPENDENCY_POLICY}\n' if PurePosixPath(path).name in ('package.json', 'README.md') else '')
                    +(f'PREVIOUS VALIDATION ERROR: {error}\nRepair and output the WHOLE FILE.\n' if error else ''))
             raw=_ask(query,provider,'You implement correct single-file source code/configurations. Never add markdown fences. Never execute code.',MAX_FILE_BYTES+2000)
             source=_strip_fence(raw)

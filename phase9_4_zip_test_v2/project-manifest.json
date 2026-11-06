@@ -1,0 +1,154 @@
+{
+  "generator": "Phase 7.9 V2 Universal ZIP",
+  "project": "equipment-inventory-dashboard",
+  "contracts": [
+    "The project uses React 18.3.x, TypeScript 5.7.x, Vite 6.1.x, and @vitejs/plugin-react 4.3.x; these versions are mutually compatible and use only standard React, TypeScript, and Vite dependencies.",
+    "The application runs with Vite's default development port 5173 and has no backend, API routes, environment variables, paid services, or external runtime dependencies.",
+    "Equipment records use the TypeScript shape { id: string; name: string; category: string; serialNumber: string; location: string; status: \"Available\" | \"In Use\" | \"Maintenance\" | \"Retired\"; assignedTo: string; purchaseDate: string; notes: st",
+    "Browser localStorage key \"equipment-inventory-items\" stores a JSON array of Equipment records. Invalid or unavailable storage falls back to the built-in mock dataset without breaking the UI.",
+    "App owns equipment state and CRUD behavior. EquipmentTable receives equipment, search query, status filter, sort configuration, and callbacks for edit and delete. EquipmentForm receives an optional equipment record, submit callback, cancel ",
+    "DeleteConfirmation receives the selected equipment record, confirmation callback, cancellation callback, and visible state.",
+    "SummaryCards receives the complete equipment array and displays total, available, in-use, maintenance, and retired counts.",
+    "Shared UI types and status values are defined in src/types/equipment.ts and imported by state, components, and utility modules rather than duplicated.",
+    "Filtering searches name, category, serial number, location, assignedTo, and notes case-insensitively. Sorting supports name, category, status, location, purchaseDate, and assignedTo in ascending or descending order.",
+    "README.md documents npm install, npm run dev, npm run build, npm audit, localStorage behavior, and that audit or build commands must be run by the user; it does not claim that tests, builds, or audits were run."
+  ],
+  "files": [
+    {
+      "path": "package.json",
+      "purpose": "Declares the React, TypeScript, Vite, and type-checking dependencies plus dev, build, preview, and audit scripts.",
+      "depends_on": []
+    },
+    {
+      "path": "index.html",
+      "purpose": "Provides the Vite HTML entry document with an accessible root element and page metadata.",
+      "depends_on": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "tsconfig.json",
+      "purpose": "Defines strict TypeScript compiler settings for the Vite React application.",
+      "depends_on": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "tsconfig.node.json",
+      "purpose": "Defines TypeScript settings for Vite configuration files.",
+      "depends_on": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "vite.config.ts",
+      "purpose": "Configures the React plugin and Vite development/build behavior.",
+      "depends_on": [
+        "package.json",
+        "tsconfig.node.json"
+      ]
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "purpose": "Provides Vite client type declarations required by TypeScript.",
+      "depends_on": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "src/types/equipment.ts",
+      "purpose": "Defines Equipment, EquipmentStatus, sort configuration, and form data contracts shared across the application.",
+      "depends_on": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "src/data/mockEquipment.ts",
+      "purpose": "Contains realistic initial equipment records covering multiple categories, locations, assignees, dates, and statuses.",
+      "depends_on": [
+        "src/types/equipment.ts"
+      ]
+    },
+    {
+      "path": "src/utils/equipmentStorage.ts",
+      "purpose": "Loads and persists Equipment arrays through localStorage using the shared storage key and safe fallback behavior.",
+      "depends_on": [
+        "src/types/equipment.ts",
+        "src/data/mockEquipment.ts"
+      ]
+    },
+    {
+      "path": "src/components/SummaryCards.tsx",
+      "purpose": "Renders responsive accessible summary cards calculated from the current equipment collection.",
+      "depends_on": [
+        "src/types/equipment.ts"
+      ]
+    },
+    {
+      "path": "src/components/EquipmentForm.tsx",
+      "purpose": "Renders reusable add and edit forms with validation, accessible labels, status/category fields, and submit/cancel actions.",
+      "depends_on": [
+        "src/types/equipment.ts"
+      ]
+    },
+    {
+      "path": "src/components/EquipmentTable.tsx",
+      "purpose": "Renders the responsive equipment table, search/filter/sort controls, empty states, and row actions for editing and deleting.",
+      "depends_on": [
+        "src/types/equipment.ts"
+      ]
+    },
+    {
+      "path": "src/components/DeleteConfirmation.tsx",
+      "purpose": "Renders an accessible modal confirmation dialog for deleting a selected equipment record.",
+      "depends_on": [
+        "src/types/equipment.ts"
+      ]
+    },
+    {
+      "path": "src/App.tsx",
+      "purpose": "Owns equipment state, localStorage persistence, CRUD operations, search/filter/sort state, summary display, form visibility, and delete confirmation orchestration.",
+      "depends_on": [
+        "src/types/equipment.ts",
+        "src/data/mockEquipment.ts",
+        "src/utils/equipmentStorage.ts",
+        "src/components/SummaryCards.tsx",
+        "src/components/EquipmentForm.tsx",
+        "src/components/EquipmentTable.tsx",
+        "src/components/DeleteConfirmation.tsx"
+      ]
+    },
+    {
+      "path": "src/styles.css",
+      "purpose": "Provides responsive layout, dashboard cards, controls, table, form, modal, focus states, status badges, reduced-motion support, and accessible color styling.",
+      "depends_on": [
+        "src/App.tsx"
+      ]
+    },
+    {
+      "path": "src/main.tsx",
+      "purpose": "Mounts the App component into the HTML root and imports the global stylesheet.",
+      "depends_on": [
+        "src/App.tsx",
+        "src/styles.css"
+      ]
+    },
+    {
+      "path": "README.md",
+      "purpose": "Documents project features, prerequisites, npm install, npm run dev, npm run build, npm run preview, npm audit, localStorage persistence, and usage instructions.",
+      "depends_on": [
+        "package.json",
+        "src/App.tsx",
+        "src/utils/equipmentStorage.ts"
+      ]
+    }
+  ],
+  "validation": "Static checks only; not compiled or executed. Review before deployment.",
+  "validation_advisories": [],
+  "generation_cycle_breaks": [
+    {
+      "file": "src/styles.css",
+      "dependency": "src/main.tsx"
+    }
+  ]
+}

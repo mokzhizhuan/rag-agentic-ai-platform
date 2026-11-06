@@ -77,6 +77,15 @@ def validate_plan(plan):
                  'right': _strings(item.get('right'), 12, 180)}
         if layout in ('bullets', 'flow') and not slide['bullets']:
             raise PresentationQualityError(f'Slide {idx} has no bullets')
+        # A recommendation/next-step closing slide is not a title-only outro.
+        # Demand two or three short, actionable takeaways from the planner.
+        if layout == 'closing' and any(word in title.casefold() for word in
+                ('recommendation', 'next step', 'action plan', 'follow-up', 'conclusion')):
+            if not (2 <= len(slide['bullets']) <= 3) or any(
+                    len(item) > 105 for item in slide['bullets']):
+                raise PresentationQualityError(
+                    f'Slide {idx}: concluding slide needs 2-3 concise, '
+                    'substantive recommendation bullets (max 105 characters each)')
         if layout == 'two_column' and (not slide['left'] or not slide['right']):
             raise PresentationQualityError(f'Slide {idx} lacks column content')
         if layout in ('table', 'risk'):
@@ -236,7 +245,13 @@ def render_presentation(plan):
         if cover:
             _rect(slide, .8, 2.05, .11, 2.3, (85, 178, 238))
             _textbox(slide, 1.15, 2.05, 11.0, 1.35, title, size=37, bold=True, color=(255,255,255))
-            _textbox(slide, 1.15, 3.55, 10.6, 1.0, data['subtitle'], size=20, color=(204,225,240))
+            _textbox(slide, 1.15, 3.55, 10.6, .65, data['subtitle'], size=20, color=(204,225,240))
+            if layout == 'closing':
+                # Editable, visible closing takeaways. No invented content.
+                for bullet_index, takeaway in enumerate(data['bullets'][:3]):
+                    _textbox(slide, 1.28, 4.40 + .73 * bullet_index,
+                             10.7, .66, '•  ' + takeaway, size=17,
+                             color=(242, 247, 255))
         else:
             _rect(slide, 0, 0, 13.333, .13, BLUE)
             _textbox(slide, .78, .45, 11.8, .87, title, size=27, bold=True)
@@ -379,6 +394,13 @@ def generate_presentation(prompt: str, provider: str,
         notify('Planning slides' if attempt == 0 else 'Repairing slide plan', 18 + attempt*20)
         try:
             plan = validate_plan(_model(instructions, provider))
+            from .slide_count_constraints import requested_slide_count
+            requested_count = requested_slide_count(prompt)
+            if requested_count is not None and len(plan['slides']) != requested_count:
+                raise PresentationQualityError(
+                    f'Exactly {requested_count} slides requested, but layout expansion produced {len(plan["slides"])}. '
+                    'Shorten or redistribute dense tables and bullets to fit the exact slide count; preserve every required topic.'
+                )
             notify('Rendering editable slides', 73)
             output = render_presentation(plan)
             notify('PowerPoint validated', 95)

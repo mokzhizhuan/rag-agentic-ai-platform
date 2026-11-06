@@ -126,10 +126,10 @@ def render_word(title, sections):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     title, sections = normalize_sections(title, sections)
     doc=Document(); sec=doc.sections[0]
-    sec.top_margin=Inches(.8); sec.bottom_margin=Inches(.7)
+    sec.top_margin=Inches(.76); sec.bottom_margin=Inches(.68)
     sec.left_margin=Inches(.85); sec.right_margin=Inches(.85)
     normal=doc.styles['Normal']; normal.font.name='Aptos'; normal.font.size=Pt(10.5)
-    normal.paragraph_format.space_after=Pt(7)
+    normal.paragraph_format.space_after=Pt(5.4)
     for name,size,color in [('Title',21,(24,55,90)),('Heading 1',15,(24,65,102)),('Heading 2',12,(34,78,111))]:
         style=doc.styles[name]; style.font.name='Aptos'; style.font.size=Pt(size)
         style.font.bold=True; style.font.color.rgb=RGBColor(*color)
@@ -238,7 +238,7 @@ def table_layout(rows):
     return 'portrait'
 
 
-def render_pdf(title, sections):
+def _render_pdf_once(title, sections, *, _compact_level=0):
     """Build accessible PDF with two-pass, clickable and page-numbered contents."""
     from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame, Paragraph,
         Spacer, Table, TableStyle, Preformatted, PageBreak, NextPageTemplate)
@@ -260,7 +260,8 @@ def render_pdf(title, sections):
     sub_style = ParagraphStyle('DQSub3', parent=styles['Heading3'], fontSize=10.5,
         leading=15, textColor=dark, spaceBefore=9, spaceAfter=5, keepWithNext=True)
     body = ParagraphStyle('DQBody3', parent=styles['BodyText'], fontSize=9.5,
-        leading=14.2, spaceAfter=9)
+        leading=(14.2, 14.0, 13.8)[_compact_level],
+        spaceAfter=(9, 5.5, 3.5)[_compact_level])
     bullet = ParagraphStyle('DQBullet3', parent=body, leftIndent=16, firstLineIndent=-10)
     cell = ParagraphStyle('DQCell3', parent=body, fontSize=7.5, leading=10.5, spaceAfter=0)
     cover = ParagraphStyle('DQCover3', parent=body, alignment=TA_CENTER,
@@ -312,6 +313,7 @@ def render_pdf(title, sections):
     toc.dotsMinLevel = 0
     story += [toc, PageBreak()]
     for idx, section in enumerate(sections, start=1):
+        section_story_start = len(story)
         head = Paragraph(escape(section['heading']), heading_style)
         head._dq_section_key = f'section_{idx}'
         story.append(head)
@@ -335,7 +337,7 @@ def render_pdf(title, sections):
                     data = [[Paragraph(escape(_inline_text(str(v)[:800])), cell)
                              for v in row] for row in rows]
                     table = Table(data, colWidths=col_widths, repeatRows=1,
-                        hAlign='LEFT', splitByRow=1)
+                        hAlign='LEFT', splitByRow=1, splitInRow=1)
                     table.setStyle(TableStyle([
                         ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#DFEAF3')),
                         ('LINEBELOW',(0,0),(-1,0),0.6,colors.HexColor('#7292AC')),
@@ -345,11 +347,24 @@ def render_pdf(title, sections):
                         ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white, colors.HexColor('#F5F8FC')])
                     ]))
                     if orientation == 'landscape':
-                        # Dedicated landscape appendix keeps the body portrait.
-                        # PageBreak commits the template switch before the table.
-                        story.extend([NextPageTemplate('landscape_tables'), PageBreak(),
-                            Paragraph(escape(section['heading']) + ' — Table', sub_style),
-                            table, NextPageTemplate('report'), PageBreak()])
+                        # When a short section introduces a wide table, keep
+                        # its heading and introductory text WITH that table.
+                        # Otherwise an otherwise-empty portrait page appears
+                        # immediately before the landscape table page.
+                        # Moving at most three simple paragraph flowables
+                        # avoids relocating long, multi-page sections.
+                        preface = story[section_story_start:]
+                        can_move = (0 < len(preface) <= 3 and
+                                    all(isinstance(item, Paragraph) for item in preface))
+                        if can_move:
+                            del story[section_story_start:]
+                        else:
+                            preface = [Paragraph(
+                                escape(section['heading']) + ' — Table', sub_style)]
+                        story.extend([NextPageTemplate('landscape_tables'), PageBreak()])
+                        story.extend(preface)
+                        story.extend([table, NextPageTemplate('report'), PageBreak()])
+                        section_story_start = len(story)
                     else:
                         story.extend([table, Spacer(1, 9)])
             elif kind == 'code':
@@ -393,3 +408,42 @@ def render_pdf(title, sections):
         if not any(page.get('/Annots') for page in toc_pages):
             raise DocumentQualityError('Contents page has no clickable links.')
     return payload
+
+
+
+def _has_orphan_before_landscape(pdf_bytes: bytes) -> bool:
+    """Detect a mostly empty portrait page before a landscape table page."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        for i in range(1, len(reader.pages)):
+            preceding, upcoming = reader.pages[i - 1], reader.pages[i]
+            if not (float(preceding.mediabox.width) < float(preceding.mediabox.height)
+                    and float(upcoming.mediabox.width) > float(upcoming.mediabox.height)):
+                continue
+            lines = [line.strip() for line in (preceding.extract_text() or '').splitlines()]
+            useful = [line for line in lines if line and not line.startswith(
+                ('Draft technical report - review before use', 'Page '))]
+            # Skip cover and TOC pages, and don't reflow a useful content page.
+            if i >= 3 and len(' '.join(useful)) < 180 and len(useful) <= 4:
+                return True
+    except Exception:
+        # Diagnostic only; don't invalidate an otherwise good PDF.
+        return False
+    return False
+
+
+def render_pdf(title, sections):
+    """Build PDF; retry sparse orientation boundaries with conservative spacing.
+
+    No model calls, table removal, truncation or post-process page deletion.
+    Bookmarks, TOC and headers are regenerated on each independent pass.
+    """
+    result = _render_pdf_once(title, sections, _compact_level=0)
+    if not _has_orphan_before_landscape(result):
+        return result
+    for level in (1, 2):
+        result = _render_pdf_once(title, sections, _compact_level=level)
+        if not _has_orphan_before_landscape(result):
+            break
+    return result

@@ -71,6 +71,13 @@ def _model_text(prompt, provider, instruction, *, max_chars=38000):
 
 
 def _structured(prompt, provider, fmt):
+    if fmt in ('excel', 'csv') and provider == 'openai':
+        from chat.providers import generate_spreadsheet_json, ChatProviderError
+        try:
+            result = generate_spreadsheet_json(prompt, provider)
+        except ChatProviderError as exc:
+            raise ArtifactGenerationError(str(exc)) from exc
+        return result['title'], [], result['columns'], result['rows'], []
     schema = '''Return ONE valid JSON object, without Markdown fences, with these keys:
 "title": string (up to 100 chars),
 "sections": array of up to 8 objects {"heading":string,"body":string},
@@ -182,7 +189,7 @@ def create_artifact(prompt, provider, requested, image_references=None):
         return fmt, output.encode('utf-8')
     if fmt in ('word', 'pdf'):
         try:
-            title, sections = generate_report_sections(prompt, provider)
+            title, sections = generate_report_sections(prompt, provider, require_table=(fmt == 'pdf'))
         except LongformError as exc:
             raise ArtifactGenerationError(str(exc)) from exc
         columns, rows, slides = [], [], []
@@ -203,9 +210,16 @@ def create_artifact(prompt, provider, requested, image_references=None):
         from openpyxl.worksheet.table import Table, TableStyleInfo
         wb = Workbook()
         ws = wb.active; ws.title = 'Data'
+        from .artifact_cell_types import typed_cell
         ws.append(cols)
         for row in data:
-            ws.append(row)
+            values = [typed_cell(col, value) for col, value in zip(cols, row)]
+            ws.append([value for value, _ in values])
+            for cell, (_, number_format) in zip(ws[ws.max_row], values):
+                if number_format:
+                    cell.number_format = number_format
+                elif isinstance(cell.value, str) and cell.value.startswith('='):
+                    cell.data_type = 's'
         ws.freeze_panes = 'A2'
         for cell in ws[1]:
             cell.font = Font(bold=True, color='FFFFFF')

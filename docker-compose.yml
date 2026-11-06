@@ -15,6 +15,25 @@ services:
       retries: 15
     restart: unless-stopped
 
+  generation-worker:
+    build: ./backend
+    command: python -u manage.py generation_worker
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: '5432'
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/rag-app/protocol/openid-connect/certs
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/rag-app
+      KEYCLOAK_AUDIENCE: rag-api
+      CORS_ALLOWED_ORIGINS: http://localhost:5174
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.1
     command: ["start-dev", "--import-realm"]

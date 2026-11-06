@@ -1,0 +1,56 @@
+# RAG Knowledge Base — Test Document
+
+## 1. System Overview
+The RAG Knowledge AI platform is a document retrieval system that allows authenticated users to upload technical documents and search their content.
+
+The system uses React for its frontend interface, Django REST Framework for its backend API, Keycloak for authentication, PostgreSQL with pgvector for vector storage, and Ollama for local AI processing.
+
+## 2. User Authentication
+Keycloak manages user login, authentication, and role-based access control.
+
+Users must authenticate using their Keycloak credentials before accessing protected Django API endpoints.
+
+The RAG application supports two roles:
+- rag-user: Standard user with access to their own documents.
+- rag-admin: Administrator with additional management permissions.
+
+## 3. Document Processing
+Users can upload PDF, DOCX, TXT, and Markdown documents.
+
+After upload, Django extracts the document's text and divides it into smaller overlapping chunks.
+
+Each chunk is converted into a numerical vector using the nomic-embed-text embedding model through Ollama.
+
+## 4. Database Storage
+PostgreSQL stores document metadata, ownership information, text chunks, and embeddings.
+
+The pgvector extension enables similarity searches between question embeddings and stored document embeddings.
+
+Each user can retrieve only documents they are authorized to access.
+
+## 5. AI Provider Configuration
+The platform supports configurable AI providers.
+
+Ollama provides locally hosted AI models without requiring an OpenAI API key.
+
+OpenAI can be selected as an alternative provider when an API key is configured.
+
+The llama3.2 model is designated for chat generation, while nomic-embed-text is used for embeddings.
+
+## 6. RAG Pipeline
+The Retrieval-Augmented Generation process follows these steps:
+
+1. A user submits a question.
+2. The application converts the question into an embedding.
+3. PostgreSQL pgvector searches for similar document chunks.
+4. Relevant chunks are retrieved from the user's authorized documents.
+5. A language model uses the retrieved information to generate an answer with source references.
+
+In Phase 2, only document indexing and semantic retrieval are implemented. AI-generated answers are planned for Phase 3.
+
+## 7. System Requirements
+The frontend runs on port 5174.
+The Django API runs on port 8200.
+The Keycloak authentication server runs on port 8180.
+PostgreSQL runs inside the Docker network.
+Ollama runs locally on the Windows host using port 11434.

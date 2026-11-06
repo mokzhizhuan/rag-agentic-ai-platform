@@ -125,7 +125,7 @@ import json
 import logging
 import os
 from django.http import StreamingHttpResponse
-from .providers import stream_generate, plan_tool, plan_auto, GENERAL_PROMPT
+from .providers import stream_generate, plan_tool, plan_auto, rewrite_followup, GENERAL_PROMPT
 from .web_research import should_search, research, context as web_context, WebResearchError
 # Phase 5: bounded, in-memory attachment extraction. Original binaries are not retained.
 from .attachments import AttachmentError
@@ -134,6 +134,40 @@ from .memory import conversation_context, update_summary, memory_system_context,
 
 
 stream_log = logging.getLogger(__name__)
+
+
+# Resolve short document follow-ups only within the currently selected conversation.
+# Never use history from another conversation or another account.
+def _contextual_document_question(question, conversation):
+    """Return a source-backed earlier user/assistant pair for an ambiguous follow-up.
+
+    The caller has already scoped conversation to the authenticated owner.
+    Do not look across conversations or use source excerpts as instructions.
+    """
+    import re
+    if conversation is None:
+        return None
+    reference = re.search(
+        r"\b(that|this|the|same|it|its|their|those)\s+"
+        r"(project|document|file|report|record|one|system|company|policy|"
+        r"study|device|product|process|procedure|equipment|contract|person)\b|"
+        r"\b(its|their|his|her)\s+\w+\b|\b(it|they|them)\b",
+        question, re.I,
+    )
+    if not reference:
+        return None
+    recent = list(conversation.messages.order_by('-id')[:20])
+    grounded_idx = next(
+        (i for i, m in enumerate(recent)
+         if m.role == 'assistant' and bool(m.sources)), None
+    )
+    if grounded_idx is None:
+        return None
+    previous = next((m.content for m in recent[grounded_idx + 1:]
+                     if m.role == 'user'), '')
+    if not previous:
+        return None
+    return previous, recent[grounded_idx].content
 
 def _sse(event, payload):
     return f'event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n'
@@ -176,12 +210,21 @@ def ask_stream(request):
     # Do not use request inside the lazy generator; it runs after the view returns.
     def events():
         try:
+            c = Conversation.objects.filter(pk=conversation_id, owner_sub=owner_sub).first() if conversation_id else None
+            prior_grounded = _contextual_document_question(question, c) if not chat_files else None
+            document_followup = prior_grounded is not None
+            resolved_question = question
+            if document_followup and mode in ('auto', 'rag'):
+                yield _sse('status', {'stage': 'resolving', 'message': 'Resolving document follow-up...'} )
+                resolved_question = rewrite_followup(question, *prior_grounded, selected_provider)
             chosen_tool = 'knowledge_search' if chat_files else 'general'
             if mode == 'auto':
                 yield _sse('status', {'stage': 'routing', 'message': 'Choosing the best answer source...'})
-                chosen_tool = 'attachment_search' if chat_files else plan_auto(question, selected_provider)
+                chosen_tool = 'attachment_search' if chat_files else ('knowledge_search' if document_followup else plan_auto(question, selected_provider))
                 yield _sse('tool', {'name':chosen_tool, 'status':'selected'})
             elif mode == 'rag':
+                # Standard RAG must search indexed documents, not default to general.
+                chosen_tool = 'knowledge_search' if not chat_files else 'attachment_search'
                 yield _sse('status', {'stage': 'searching', 'message': 'Searching knowledge base...'})
             if mode == 'agent':
                 yield _sse('status', {'stage':'planning','message':'Selecting an agent tool...'})
@@ -229,7 +272,7 @@ def ask_stream(request):
                         yield _sse('error', {'detail': 'No indexed documents for the configured embedding model. Upload a document first.'})
                         return
                 if chosen_tool == 'knowledge_search':
-                    vector = embed([question])[0]
+                    vector = embed([resolved_question])[0]
                     chunks = list(base.select_related('document').annotate(
                         distance=CosineDistance('embedding', vector)
                     ).order_by('distance', 'pk')[:int(os.getenv('RAG_TOP_K', '2'))])
@@ -251,7 +294,6 @@ def ask_stream(request):
             sources = [{**{k: p[k] for k in ('document_id', 'filename', 'page', 'chunk_index', 'similarity')},
                         'excerpt': p['text'][:700], 'attachment': bool(p.get('attachment')), 'saved_file_id': p.get('saved_file_id')} for p in passages]
             yield _sse('sources', {'sources': sources})
-            c = Conversation.objects.filter(pk=conversation_id, owner_sub=owner_sub).first() if conversation_id else None
             # A newly attached file is the authoritative input for this request.
             # Old turns may refer to different filenames and must not contaminate analysis.
             history, conversation_summary = conversation_context(c)
@@ -269,7 +311,12 @@ def ask_stream(request):
                 yield _sse('token', {'text':answer})
             elif passages:
                 yield _sse('status', {'stage': 'generating', 'message': 'Generating answer...'})
-                for token in stream_generate(question, passages, history, selected_provider, memory_context=extra_context):
+                # For resolved document follow-ups, the standalone question is
+                # authoritative. Prior assistant answers must not overshadow
+                # the new requested attribute.
+                generation_question = resolved_question if document_followup and mode in ('auto', 'rag') else question
+                generation_history = [] if document_followup and mode in ('auto', 'rag') else history
+                for token in stream_generate(generation_question, passages, generation_history, selected_provider, memory_context=extra_context):
                     answer += token
                     yield _sse('token', {'text': token})
                 answer = answer.strip()

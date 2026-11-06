@@ -36,30 +36,69 @@ def _clean(raw: str) -> str:
 
 
 def _parse_source(source: str, extension: str) -> None:
+    """Statically check JS/JSX/TS/TSX with the matching Tree-sitter grammar.
+
+    This is a syntax check, not a TypeScript typecheck or a Vite build.
+    """
     try:
         import tree_sitter
         import tree_sitter_javascript
         import tree_sitter_typescript
     except ImportError as exc:
-        raise CodeQualityError('Install tree-sitter, tree-sitter-javascript and tree-sitter-typescript in backend requirements') from exc
-    language_obj = (tree_sitter_typescript.language_tsx() if extension == 'tsx'
-                    else tree_sitter_javascript.language())
-    parser = tree_sitter.Parser(tree_sitter.Language(language_obj))
-    tree = parser.parse(source.encode('utf-8'))
-    if tree.root_node.has_error:
-        def find_error(node):
-            if node.type == 'ERROR' or node.is_missing:
-                return node
-            for child in node.children:
-                if child.has_error or child.is_missing:
-                    found = find_error(child)
-                    if found:
-                        return found
+        raise CodeQualityError(
+            'Install tree-sitter, tree-sitter-javascript and tree-sitter-typescript '
+            'in backend requirements'
+        ) from exc
+
+    extension = extension.lower().lstrip('.')
+    if extension == 'tsx':
+        grammar = tree_sitter_typescript.language_tsx()
+    elif extension == 'ts':
+        grammar = tree_sitter_typescript.language_typescript()
+    elif extension in ('js', 'jsx'):
+        grammar = tree_sitter_javascript.language()
+    else:
+        raise CodeQualityError(f'Unsupported frontend source extension: {extension}')
+
+    parser = tree_sitter.Parser(tree_sitter.Language(grammar))
+    encoded = source.encode('utf-8')
+    tree = parser.parse(encoded)
+    if not tree.root_node.has_error:
+        return
+
+    def first_error(node):
+        # A parent can report has_error because of a *nested* bad token.
+        # Never report the entire program as the location of the error.
+        if node.type == 'ERROR' or node.is_missing:
             return node
-        err = find_error(tree.root_node)
-        row, col = err.start_point
-        snippet = source.splitlines()[row][:130] if row < len(source.splitlines()) else ''
-        raise CodeQualityError(f'Syntax error near line {row+1}, column {col+1}: {snippet}')
+        for child in node.children:
+            if child.has_error or child.is_missing or child.type == 'ERROR':
+                bad = first_error(child)
+                if bad is not None:
+                    return bad
+        return None
+
+    bad = first_error(tree.root_node)
+    if bad is None:
+        raise CodeQualityError(f'{extension.upper()} parser reported a syntax error without a location')
+
+    row, col = bad.start_point
+    lines = source.splitlines()
+    line_text = lines[row] if row < len(lines) else ''
+    # Show the *actual* failing token and adjacent lines. The original code
+    # only echoed the whole first line, masking errors after an import.
+    problem = encoded[bad.start_byte:min(bad.end_byte, bad.start_byte + 100)].decode('utf-8', 'replace')
+    problem = problem.replace('\n', '\n')
+    if bad.is_missing:
+        problem = f'missing {bad.type}'
+    excerpt = ' | '.join(
+        f'{i+1}: {lines[i][:140]}'
+        for i in range(max(0, row-1), min(len(lines), row+2))
+    )
+    raise CodeQualityError(
+        f'{extension.upper()} syntax error at line {row+1}, column {col+1} '
+        f'(node={bad.type}, token={problem!r}). Near: {excerpt[:440]}'
+    )
 
 
 def _check_optional_filter_map(source: str) -> None:
